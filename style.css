@@ -235,7 +235,6 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:3px solid v
 
 /* ---- 写真（段階3） ---- */
 .photo-btn{display:inline-flex;align-items:center;gap:4px;min-height:44px;cursor:pointer}
-.photo-btn.busy{cursor:default;color:var(--steel);border-color:var(--steel)}
 .photo-pick{display:flex;align-items:center;gap:14px}
 .photo-pick .thumb{width:120px;height:84px}
 .photo-pick .thumb svg{width:96px}

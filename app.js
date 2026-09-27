@@ -229,7 +229,7 @@ function detail(v) {
   const actions = st === "use"
     ? `<button class="btn primary" data-act="goto" data-val="return" data-id="${v.id}">返却する</button>`
     : (st === "free" ? `<button class="btn primary" data-act="goto" data-val="reserve" data-id="${v.id}">この車を予約する</button>` : "");
-  return `<div class="hero">${thumbHtml(v, true)}${plateHtml(v)}${photoBtn(v)}</div>
+  return `<div class="hero">${thumbHtml(v, true)}${plateHtml(v)}</div>
   <div class="rows">${rows.map(([k, val]) => `<div class="row"><span class="k">${k}</span><span class="v">${val}</span></div>`).join("")}</div>
   <div class="actions">${actions}<button class="btn ghost" data-act="soon">修理を頼む</button></div>
   ${calendar(v)}`;
@@ -429,24 +429,16 @@ async function makePhotos(file, dir, onProgress) {
   return { photoUrl, thumbUrl, photoPath, thumbPath };
 }
 
-// 車両の写真を登録・変更（スマホの詳細画面とPCの登録フォームから使う）
-const uploading = {}; // 車ID → 送信中の％
-function photoBtn(v) {
-  const pct = uploading[v.id];
-  if (pct != null) return `<span class="photo-btn busy" data-upl="${v.id}">📷 送っています… ${pct}%</span>`;
-  return `<label class="photo-btn">📷 ${v.photoUrl ? "写真を変える" : "写真を登録"}<input type="file" accept="image/*" hidden data-photo="${v.id}"></label>`;
-}
+// 車両の写真を登録・変更（PCの登録・修正フォームからのみ。スマホは見るだけ）
+const uploading = new Set(); // 送信中の車ID
 async function setVehiclePhoto(vid, file) {
-  if (uploading[vid] != null) return;
+  if (uploading.has(vid)) { toast("この車の写真を送っているところです"); return; }
   const old = byId(vid) || {};
   const oldPaths = [old.photoPath, old.thumbPath].filter(Boolean);
-  uploading[vid] = 0; refresh();
-  if (ui.view === "pc") toast("写真を送っています…");
+  uploading.add(vid);
+  toast("写真を送っています…");
   try {
-    const p = await makePhotos(file, `vehicles/${vid}`, pct => {
-      uploading[vid] = pct;
-      document.querySelectorAll(`[data-upl="${vid}"]`).forEach(el => { el.textContent = `📷 送っています… ${pct}%`; });
-    });
+    const p = await makePhotos(file, `vehicles/${vid}`, pct => toast(`写真を送っています… ${pct}%`));
     await updateDoc(doc(db, "vehicles", vid), { ...p, updatedAt: serverTimestamp() });
     oldPaths.forEach(x => deleteObject(storageRef(storage, x)).catch(() => {})); // 前の写真は片づける
     toast("写真を登録しました");
@@ -454,7 +446,7 @@ async function setVehiclePhoto(vid, file) {
     console.error(e);
     toast(e.message === "not-image" ? "写真（画像）を選んでください" : "写真を送れませんでした。電波のよい所でもう一度お試しください");
   } finally {
-    delete uploading[vid]; refresh();
+    uploading.delete(vid);
   }
 }
 
@@ -681,10 +673,6 @@ document.addEventListener("click", e => {
 });
 document.addEventListener("change", e => {
   const el = e.target;
-  if (el.dataset && el.dataset.photo) { // 詳細画面の「📷 写真を登録」
-    const f = el.files && el.files[0]; el.value = "";
-    if (f) setVehiclePhoto(el.dataset.photo, f);
-  }
   if (el.id === "f-photo") { // PCの登録フォーム（保存を押したときに送る）
     const f = el.files && el.files[0]; if (!f) return;
     if (pendingPhoto) URL.revokeObjectURL(pendingPhoto.preview);
