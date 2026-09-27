@@ -7,12 +7,13 @@ const $ = id => document.getElementById(id);
 const SDK = `https://www.gstatic.com/firebasejs/${FIREBASE_SDK_VERSION}`;
 let fb;
 try {
-  const [app, auth, fs] = await Promise.all([
+  const [app, auth, fs, st] = await Promise.all([
     import(`${SDK}/firebase-app.js`),
     import(`${SDK}/firebase-auth.js`),
     import(`${SDK}/firebase-firestore.js`),
+    import(`${SDK}/firebase-storage.js`),
   ]);
-  fb = { ...app, ...auth, ...fs };
+  fb = { ...app, ...auth, ...fs, storageMod: st };
 } catch (e) {
   console.error(e);
   $("ph-screen").innerHTML = `<div class="errbar">読み込めませんでした。電波のよい所でもう一度開いてください。</div>`;
@@ -21,14 +22,16 @@ try {
 const {
   initializeApp, getAuth, signInAnonymously, onAuthStateChanged,
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
-  collection, doc, query, where, onSnapshot, getDocs, addDoc, updateDoc, writeBatch,
+  collection, doc, query, where, onSnapshot, getDocs, setDoc, updateDoc, writeBatch,
   serverTimestamp, Timestamp, runTransaction, getDocsFromServer, increment,
 } = fb;
+const { getStorage, ref: storageRef, uploadBytesResumable, getDownloadURL, deleteObject } = fb.storageMod;
 
 const fbApp = initializeApp(firebaseConfig);
 const auth = getAuth(fbApp);
 // 電波が悪い現場でも前回の内容が見えるよう、端末にも保存しておく
 const db = initializeFirestore(fbApp, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) });
+const storage = getStorage(fbApp);
 
 /* ---------- 定数 ---------- */
 const TYPES = ["トラック", "バン", "普通車"];
@@ -99,7 +102,10 @@ function carColor(v) { let h = 0; for (const c of v.id) h = (h * 31 + c.charCode
 function carSvg(color) {
   return `<svg viewBox="0 0 120 56" xmlns="http://www.w3.org/2000/svg"><path d="M14 40h92a4 4 0 0 0 4-4v-9c0-3-2-5-5-6l-14-3-12-11a6 6 0 0 0-4-2H38a6 6 0 0 0-5 3l-8 11-11 3c-3 1-5 3-5 6v8a4 4 0 0 0 4 4z" fill="${color}" stroke="#39424d" stroke-width="2.5" stroke-linejoin="round"/><path d="M42 12h28l9 10H35z" fill="#b8d8ee" stroke="#39424d" stroke-width="2"/><circle cx="34" cy="42" r="8" fill="#2a2f36"/><circle cx="34" cy="42" r="3.5" fill="#9aa4ae"/><circle cx="90" cy="42" r="8" fill="#2a2f36"/><circle cx="90" cy="42" r="3.5" fill="#9aa4ae"/></svg>`;
 }
-function thumbHtml(v) { return `<div class="thumb" aria-hidden="true">${v.photoUrl ? `<img src="${esc(v.photoUrl)}" alt="">` : carSvg(carColor(v))}</div>`; }
+function thumbHtml(v, big) {
+  const url = big ? v.photoUrl : (v.thumbUrl || v.photoUrl);
+  return `<div class="thumb" aria-hidden="true">${url ? `<img src="${esc(url)}" alt="" decoding="async"${big ? "" : ' loading="lazy"'}>` : carSvg(carColor(v))}</div>`;
+}
 function plateHtml(v, small) {
   return `<span class="plate"${small ? ' style="font-size:15px"' : ""}><small>${esc(v.plateArea)} ${esc(v.plateClass)}</small>${esc(v.plateKana)} ${esc(v.plateNum)}</span>`;
 }
@@ -134,7 +140,8 @@ function render() { if (ui.view === "phone") renderPhone(); else renderPc(); }
 // データが届いたときの描き直し。スマホで入力中なら、キーボードが閉じないよう後回しにする
 function refresh() {
   const a = document.activeElement;
-  if (ui.view === "phone" && a && $("ph-screen").contains(a) && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) return;
+  const typing = a && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName) && !["file", "radio", "checkbox", "button", "submit"].includes(a.type);
+  if (ui.view === "phone" && typing && $("ph-screen").contains(a)) return;
   render();
 }
 
@@ -222,7 +229,7 @@ function detail(v) {
   const actions = st === "use"
     ? `<button class="btn primary" data-act="goto" data-val="return" data-id="${v.id}">返却する</button>`
     : (st === "free" ? `<button class="btn primary" data-act="goto" data-val="reserve" data-id="${v.id}">この車を予約する</button>` : "");
-  return `<div class="hero">${thumbHtml(v)}${plateHtml(v)}<button class="photo-btn" data-act="soon">📷 ${v.photoUrl ? "写真を変える" : "写真を登録"}</button></div>
+  return `<div class="hero">${thumbHtml(v, true)}${plateHtml(v)}${photoBtn(v)}</div>
   <div class="rows">${rows.map(([k, val]) => `<div class="row"><span class="k">${k}</span><span class="v">${val}</span></div>`).join("")}</div>
   <div class="actions">${actions}<button class="btn ghost" data-act="soon">修理を頼む</button></div>
   ${calendar(v)}`;
@@ -374,6 +381,94 @@ function renderPc() {
   ${hasSample ? `<p class="sample-note">サンプルデータが入っています。本番の車を登録する前に <button class="linkbtn" data-act="unseed">サンプルデータを消す</button></p>` : ""}`;
 }
 
+/* ---------- 写真（ブラウザで縮小してから Storage へ送る） ---------- */
+const PHOTO_MAX = 1280, THUMB_MAX = 480;
+
+// 画像を読み込む（スマホで縦に撮った写真の向きも正しく直す）
+async function decodeImage(file) {
+  if (window.createImageBitmap) {
+    try { return await createImageBitmap(file, { imageOrientation: "from-image" }); } catch (e) { /* 下の方法で読む */ }
+  }
+  const url = URL.createObjectURL(file);
+  try {
+    return await new Promise((ok, ng) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => ng(new Error("画像を読めません")); i.src = url; });
+  } finally { URL.revokeObjectURL(url); }
+}
+// 長い辺が max px になるよう縮めて JPEG にする
+function toJpeg(img, max, quality) {
+  const w0 = img.naturalWidth || img.width, h0 = img.naturalHeight || img.height;
+  const k = Math.min(1, max / Math.max(w0, h0));
+  const c = document.createElement("canvas");
+  c.width = Math.round(w0 * k); c.height = Math.round(h0 * k);
+  const g = c.getContext("2d");
+  g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height); // 透明な部分は白に
+  g.drawImage(img, 0, 0, c.width, c.height);
+  return new Promise((ok, ng) => c.toBlob(b => (b ? ok(b) : ng(new Error("画像を変換できません"))), "image/jpeg", quality));
+}
+function uploadBlob(path, blob, onBytes) {
+  return new Promise((ok, ng) => {
+    const task = uploadBytesResumable(storageRef(storage, path), blob, { contentType: "image/jpeg", cacheControl: "public,max-age=31536000" });
+    task.on("state_changed", s => onBytes(s.bytesTransferred), ng, () => getDownloadURL(task.snapshot.ref).then(ok, ng));
+  });
+}
+// 1枚の写真から「大（1280px）」と「一覧用の小（480px）」を作って送る。dir は "vehicles/{id}" など
+async function makePhotos(file, dir, onProgress) {
+  if (file.type && !file.type.startsWith("image/")) throw new Error("not-image");
+  const img = await decodeImage(file);
+  let big, small;
+  try { big = await toJpeg(img, PHOTO_MAX, 0.85); small = await toJpeg(img, THUMB_MAX, 0.8); }
+  finally { if (img.close) img.close(); }
+  const name = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const photoPath = `${dir}/${name}.jpg`, thumbPath = `${dir}/${name}_s.jpg`;
+  const sent = [0, 0], total = big.size + small.size;
+  const report = () => onProgress && onProgress(Math.min(99, Math.round((sent[0] + sent[1]) / total * 100)));
+  const [photoUrl, thumbUrl] = await Promise.all([
+    uploadBlob(photoPath, big, n => { sent[0] = n; report(); }),
+    uploadBlob(thumbPath, small, n => { sent[1] = n; report(); }),
+  ]);
+  return { photoUrl, thumbUrl, photoPath, thumbPath };
+}
+
+// 車両の写真を登録・変更（スマホの詳細画面とPCの登録フォームから使う）
+const uploading = {}; // 車ID → 送信中の％
+function photoBtn(v) {
+  const pct = uploading[v.id];
+  if (pct != null) return `<span class="photo-btn busy" data-upl="${v.id}">📷 送っています… ${pct}%</span>`;
+  return `<label class="photo-btn">📷 ${v.photoUrl ? "写真を変える" : "写真を登録"}<input type="file" accept="image/*" hidden data-photo="${v.id}"></label>`;
+}
+async function setVehiclePhoto(vid, file) {
+  if (uploading[vid] != null) return;
+  const old = byId(vid) || {};
+  const oldPaths = [old.photoPath, old.thumbPath].filter(Boolean);
+  uploading[vid] = 0; refresh();
+  if (ui.view === "pc") toast("写真を送っています…");
+  try {
+    const p = await makePhotos(file, `vehicles/${vid}`, pct => {
+      uploading[vid] = pct;
+      document.querySelectorAll(`[data-upl="${vid}"]`).forEach(el => { el.textContent = `📷 送っています… ${pct}%`; });
+    });
+    await updateDoc(doc(db, "vehicles", vid), { ...p, updatedAt: serverTimestamp() });
+    oldPaths.forEach(x => deleteObject(storageRef(storage, x)).catch(() => {})); // 前の写真は片づける
+    toast("写真を登録しました");
+  } catch (e) {
+    console.error(e);
+    toast(e.message === "not-image" ? "写真（画像）を選んでください" : "写真を送れませんでした。電波のよい所でもう一度お試しください");
+  } finally {
+    delete uploading[vid]; refresh();
+  }
+}
+
+// 修理依頼の写真（段階4の「修理を頼む」画面で使う）
+// 例: const photos = await uploadRepairPhotos(repairRef.id, files, pct => …);
+//     → [{ photoUrl, thumbUrl, photoPath, thumbPath }, …] を repairs/{id}.photos に保存する
+async function uploadRepairPhotos(repairId, files, onProgress) {
+  const list = [...files], out = [];
+  for (let i = 0; i < list.length; i++) {
+    out.push(await makePhotos(list[i], `repairs/${repairId}`, pct => onProgress && onProgress(Math.round((i + pct / 100) / list.length * 100))));
+  }
+  return out;
+}
+
 /* ---------- 車両の登録・修正（PCのみ） ---------- */
 let modalId = null; // null=追加, 文字列=修正中の車
 function openModal(id) {
@@ -401,6 +496,9 @@ function openModal(id) {
         ${v ? `<div class="hint">車検を受けたら、新しい満了日に変えて保存してください</div>` : ""}</div>
       <div class="field"><label for="f-lot">通常の置き場所</label><select id="f-lot" name="homeLot">
         ${lots.map(l => `<option${(v ? v.homeLot === l : l === lots[0]) ? " selected" : ""}>${esc(l)}</option>`).join("")}</select></div>
+      <div class="field"><label>写真（任意）</label>
+        <div class="photo-pick"><span id="f-prev">${v ? thumbHtml(v) : `<div class="thumb">${carSvg(CAR_COLORS[0])}</div>`}</span>
+        <label class="photo-btn">📷 ${v && v.photoUrl ? "写真を変える" : "写真を選ぶ"}<input type="file" accept="image/*" hidden id="f-photo"></label></div></div>
     </div>
     <div class="mfoot">
       ${v ? `<button type="button" class="btn danger" data-act="retire">廃車にする</button>` : ""}
@@ -412,7 +510,12 @@ function openModal(id) {
   $("modal").hidden = false;
   $("vform").plateArea.focus();
 }
-function closeModal() { $("modal").hidden = true; $("modal").innerHTML = ""; modalId = null; }
+let pendingPhoto = null; // フォームで選んだ写真（保存するときに送る）
+function closeModal() {
+  $("modal").hidden = true; $("modal").innerHTML = ""; modalId = null;
+  if (pendingPhoto) URL.revokeObjectURL(pendingPhoto.preview);
+  pendingPhoto = null;
+}
 
 // 全角の数字・ハイフンを半角に（入力ゆれ対策）
 const toHalf = s => s.replace(/[０-９Ａ-Ｚａ-ｚ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)).replace(/[－ー−‐]/g, "-");
@@ -439,15 +542,18 @@ function saveVehicle(form) {
   if (err) { const e = $("ferr"); e.textContent = err; e.hidden = false; return; }
 
   // 電波が悪くても画面はすぐ閉じる（Firestore が裏で送る）
+  const ref = modalId ? doc(db, "vehicles", modalId) : doc(collection(db, "vehicles"));
   const p = modalId
-    ? updateDoc(doc(db, "vehicles", modalId), { ...data, updatedAt: serverTimestamp() })
-    : addDoc(collection(db, "vehicles"), {
+    ? updateDoc(ref, { ...data, updatedAt: serverTimestamp() })
+    : setDoc(ref, {
         ...data, currentLot: data.homeLot, photoUrl: null, status: "free", retired: false,
         createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
       });
+  const file = pendingPhoto && pendingPhoto.file;
   toast(modalId ? "保存しました" : "登録しました");
   closeModal();
   p.catch(e => { console.error(e); toast("保存できませんでした。もう一度お試しください"); });
+  if (file) setVehiclePhoto(ref.id, file);
 }
 
 function retireVehicle(id) {
@@ -513,7 +619,12 @@ async function unseed() {
   if (!confirm("サンプルデータ（サンプルの車と、その車で試しに入れた予約・修理）をすべて消します。\n自分で登録した車は消えません。\n\n消しますか？")) return;
   try {
     const refs = new Map(); // 同じ記録を2回消さないよう、場所で重複をまとめる
-    const add = snap => snap.forEach(d => refs.set(d.ref.path, d.ref));
+    const paths = []; // 写真ファイルの場所（車の写真・修理の写真）
+    const add = snap => snap.forEach(d => {
+      refs.set(d.ref.path, d.ref);
+      const x = d.data();
+      paths.push(x.photoPath, x.thumbPath, ...(x.photos || []).flatMap(p => [p.photoPath, p.thumbPath]));
+    });
     const cars = await getDocs(query(collection(db, "vehicles"), where("sample", "==", true)));
     const ids = cars.docs.map(d => d.id);
     for (const c of ["reservations", "repairs"]) {
@@ -527,6 +638,8 @@ async function unseed() {
       all.slice(i, i + 400).forEach(r => b.delete(r));
       await b.commit();
     }
+    // 写真ファイルも消す（消せなくても続ける）
+    await Promise.all(paths.filter(Boolean).map(p => deleteObject(storageRef(storage, p)).catch(() => {})));
     toast("サンプルデータを消しました");
   } catch (e) { console.error(e); toast("消せませんでした"); }
 }
@@ -564,6 +677,19 @@ document.addEventListener("click", e => {
     case "restore": restoreVehicle(id); break;
     case "seed": seed(); break;
     case "unseed": unseed(); break;
+  }
+});
+document.addEventListener("change", e => {
+  const el = e.target;
+  if (el.dataset && el.dataset.photo) { // 詳細画面の「📷 写真を登録」
+    const f = el.files && el.files[0]; el.value = "";
+    if (f) setVehiclePhoto(el.dataset.photo, f);
+  }
+  if (el.id === "f-photo") { // PCの登録フォーム（保存を押したときに送る）
+    const f = el.files && el.files[0]; if (!f) return;
+    if (pendingPhoto) URL.revokeObjectURL(pendingPhoto.preview);
+    pendingPhoto = { file: f, preview: URL.createObjectURL(f) };
+    $("f-prev").innerHTML = `<div class="thumb"><img src="${pendingPhoto.preview}" alt=""></div>`;
   }
 });
 document.addEventListener("submit", e => {

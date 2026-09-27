@@ -232,3 +232,10 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:3px solid v
 
 /* ---- お知らせ（画面下にふわっと出る） ---- */
 .toast{position:fixed;left:50%;bottom:calc(96px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:12px 18px;border-radius:12px;font-weight:700;font-size:15px;z-index:60;max-width:calc(100% - 32px);box-shadow:0 6px 20px rgba(0,0,0,.2)}
+
+/* ---- 写真（段階3） ---- */
+.photo-btn{display:inline-flex;align-items:center;gap:4px;min-height:44px;cursor:pointer}
+.photo-btn.busy{cursor:default;color:var(--steel);border-color:var(--steel)}
+.photo-pick{display:flex;align-items:center;gap:14px}
+.photo-pick .thumb{width:120px;height:84px}
+.photo-pick .thumb svg{width:96px}
