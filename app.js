@@ -48,6 +48,7 @@ const CAR_COLORS = ["#dfe4ea", "#f3f3f3", "#cfd6de", "#f7f7f7", "#c9d1d9", "#eef
 const S = {
   vehicles: [], reservations: [], repairs: [],
   settings: { ...DEFAULT_SETTINGS }, settingsExists: false,
+  members: [], membersLoaded: false, // 名簿（日報アプリと同じ形：name / kubun / shozoku / active）
   ready: false, error: "",
 };
 
@@ -72,11 +73,38 @@ const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return 
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* 保存できなくても動く */ } };
 const millis = t => (t && t.toMillis ? t.toMillis() : Number.MAX_SAFE_INTEGER);
 
+/* ---------- 名簿（日報アプリと同じ区分・並び順） ---------- */
+const MGROUPS = ["自社", "常駐協力", "外注協力"];
+// 日報アプリと同じく、古い「協力」や空欄は「常駐協力」として扱う
+const mGroupOf = w => (!w || w.kubun === "自社") ? "自社" : (w.kubun === "外注協力" ? "外注協力" : "常駐協力");
+const isKana = x => /^[ァ-ヴー]+$/.test(x);
+const byLen = (a, b) => (isKana(a) - isKana(b)) || (a.length - b.length) || a.localeCompare(b, "ja");
+// 名簿がまだ空のときは、これまでの「名前リスト」を自社として使う
+function roster() {
+  if (S.members.length) return S.members;
+  return (S.settings.people || []).map(name => ({ id: "", name, kubun: "自社", shozoku: "", active: true }));
+}
+const activeMembers = () => roster().filter(m => m.active !== false);
+// 区分ごとに分けた名前のボタン（日報アプリと同じ並び）。act は押したときの動き
+function nameChips(q, selected, act) {
+  q = String(q || "").trim();
+  let html = "";
+  MGROUPS.forEach(g => {
+    const names = activeMembers().filter(m => mGroupOf(m) === g).map(m => m.name).filter(n => !q || n.includes(q)).sort(byLen);
+    if (!names.length) return;
+    html += `<div class="mgroup">${g}</div><div class="ngrid">${names.map(n =>
+      `<button class="nchip${selected === n ? " on" : ""}" data-act="${act}" data-val="${esc(n)}">${esc(n)}</button>`).join("")}</div>`;
+  });
+  if (html) return html;
+  if (!S.membersLoaded && !S.settings.people) return `<div class="loading">名簿を読み込んでいます…</div>`;
+  return `<div class="empty">${q ? "該当する名前がありません" : "名簿がまだありません。事務所のPCで名簿を取り込んでください"}</div>`;
+}
+
 /* ---------- 自分の名前（このスマホに覚えておく） ---------- */
 let ME = lsGet("sharyo_me") || "";
 function saveMe(n) {
   n = String(n || "").trim().slice(0, 40); if (!n) return;
-  ME = n; lsSet("sharyo_me", n); resetForm();
+  ME = n; lsSet("sharyo_me", n); resetForm(); meQuery = "";
   go({ name: "list" });
 }
 
@@ -187,13 +215,13 @@ function renderPhone() {
   s.innerHTML = errBar() + body;
 }
 
+let meQuery = "";
 function nameScreen(first) {
-  const people = S.settings.people || [];
   return `<div class="welcome">${first
     ? `<h2>あなたの名前を選んでください</h2><p class="sub" style="margin:0 0 14px">このスマホに覚えておきます。予約するとき自動で入ります</p>`
     : `<p class="sub" style="margin:0 0 14px">今は「${esc(ME)}」です。変えるなら選んでください</p>`}
-  <div class="opts">${people.map(p => `<button class="opt ${ME === p ? "on" : ""}" data-act="me" data-val="${esc(p)}">${esc(p)}<span>›</span></button>`).join("")}</div>
-  <div class="field" style="margin-top:16px"><label for="meIn">リストにない名前</label><form id="meform" class="two" style="grid-template-columns:1fr auto"><input id="meIn" name="me" placeholder="名前を入力" maxlength="40" autocomplete="off"><button type="submit" class="btn primary" style="width:auto;padding:12px 18px;font-size:16px">決定</button></form></div></div>`;
+  <input type="search" id="meSearch" class="nsearch" placeholder="名前で探す" value="${esc(meQuery)}" autocomplete="off" aria-label="名前で探す">
+  <div id="meList">${nameChips(meQuery, ME, "me")}</div></div>`;
 }
 
 function listShaken() {
@@ -282,15 +310,18 @@ function reserveForm(v) {
   const t = ymd(today());
   if (form.vid !== v.id) { resetForm(); form.vid = v.id; }
   form.from = form.from || t; form.to = form.to || form.from; form.site = form.site || "";
-  const people = [...new Set([ME, ...(S.settings.people || [])])];
   const sites = S.settings.sites || [];
   return `<div class="sheet-title">${esc(v.kind)}</div><p class="sub">${plateText(v)}</p>
   <div class="field"><label>いつからいつまで</label><div class="two">
     <input type="date" name="from" value="${form.from}" aria-label="いつから">
     <input type="date" name="to" value="${form.to}" min="${form.from}" aria-label="いつまで"></div></div>
-  <div class="field"><label>使う人</label>${form.other
-    ? `<select name="who" aria-label="使う人"><option value="">選んでください</option>${people.map(p => `<option value="${esc(p)}"${form.who === p ? " selected" : ""}>${esc(p)}${p === ME ? "（自分）" : ""}</option>`).join("")}</select><button class="chip" style="margin-top:8px" data-act="whoMe">自分に戻す</button>`
-    : `<div class="mine"><span>${esc(ME)}さん（自分）</span><button class="sw" data-act="whoOther">別の人にする</button></div>`}</div>
+  <div class="field"><label>使う人</label>${!form.other
+    ? `<div class="mine"><span>${esc(ME)}さん（自分）</span><button class="sw" data-act="whoOther">別の人にする</button></div>`
+    : (form.who && !form.picking
+      ? `<div class="mine"><span>${esc(form.who)}さん</span><button class="sw" data-act="whoOther">変える</button></div><button class="chip" style="margin-top:8px" data-act="whoMe">自分に戻す</button>`
+      : `<div class="picker"><input type="search" id="whoSearch" class="nsearch" placeholder="名前で探す" value="${esc(form.whoQ || "")}" autocomplete="off" aria-label="使う人を名前で探す">
+          <div id="whoList">${nameChips(form.whoQ, form.who, "pickWho")}</div>
+          <button class="chip" style="margin-top:4px" data-act="whoMe">自分に戻す</button></div>`)}</div>
   <div class="field"><label for="f-site">行く現場</label><select id="f-site" name="site"><option value="">選んでください</option>${sites.map(p => `<option value="${esc(p)}"${form.site === p ? " selected" : ""}>${esc(p)}</option>`).join("")}<option value="${SITE_OTHER}"${form.site === SITE_OTHER ? " selected" : ""}>その他（入力する）</option></select>
     ${form.site === SITE_OTHER ? `<input name="siteOther" style="margin-top:8px" placeholder="現場の名前を入力" maxlength="100" value="${esc(form.siteOther || "")}" aria-label="現場の名前">` : ""}</div>
   ${form.err ? `<p class="ferr">${esc(form.err)}</p>` : ""}
@@ -300,7 +331,7 @@ function reserveForm(v) {
 async function doReserve(v) {
   if (form.busy) return;
   const t = ymd(today());
-  const who = form.other ? (form.who || "") : ME;
+  const who = form.other ? (form.picking ? "" : (form.who || "")) : ME;
   const site = form.site === SITE_OTHER ? String(form.siteOther || "").trim() : form.site;
   const { from, to } = form;
   let err = "";
@@ -675,9 +706,19 @@ function openSettings() {
     <h2>設定<button type="button" class="x" data-act="close" aria-label="閉じる">×</button></h2>
     <div class="mbody">
       <p class="ferr" id="ferr" hidden></p>
-      <div class="field"><label for="s-people">名前リスト（現場担当者）</label>
-        <textarea id="s-people" name="people" rows="6">${lines(st.people)}</textarea>
-        <div class="hint">1行に1人。スマホの「あなたの名前」と、予約の「別の人にする」に出ます</div></div>
+      <div class="field"><label>名簿</label>
+        <div class="mtools">
+          <button type="button" class="btn primary small" data-act="memImport">日報の名簿から取り込む</button>
+          <input type="search" id="memSearch" placeholder="名前・所属で探す" value="${esc(memQuery)}" autocomplete="off" aria-label="名簿を探す">
+        </div>
+        <div class="hint">スマホの「あなたの名前」と、予約の「別の人にする」に出ます。車を使わない人は「隠す」にしてください。<br>名簿の変更（取り込み・隠す・追加）は、押したときにすぐ保存されます</div>
+        <div id="mlist" class="mlist"></div>
+        <div class="madd">
+          <input id="madd-name" placeholder="名前" maxlength="30" autocomplete="off" aria-label="追加する人の名前">
+          <select id="madd-kubun" aria-label="区分">${MGROUPS.map(g => `<option>${g}</option>`).join("")}</select>
+          <input id="madd-shozoku" placeholder="所属（例：よつば建設）" maxlength="30" autocomplete="off" aria-label="所属">
+          <button type="button" class="btn ghost small" data-act="memAdd">＋ 1人追加</button>
+        </div></div>
       <div class="field"><label for="s-sites">現場リスト</label>
         <textarea id="s-sites" name="sites" rows="6">${lines(st.sites)}</textarea>
         <div class="hint">1行に1つ。予約の「行く現場」に出ます（リストにない現場は「その他」で入力できます）</div></div>
@@ -694,13 +735,82 @@ function openSettings() {
     </div>
   </form></div>`;
   $("modal").hidden = false;
-  $("s-people").focus();
+  renderMemberList();
+}
+
+let memQuery = "";
+// 設定画面の名簿一覧（区分ごと。隠した人も「隠し中」で出す）
+function renderMemberList() {
+  const el = $("mlist"); if (!el) return;
+  const q = memQuery.trim();
+  const all = S.members;
+  const hidden = all.filter(m => m.active === false).length;
+  if (!all.length) { el.innerHTML = `<div class="empty">名簿はまだありません。「日報の名簿から取り込む」を押してください</div>`; return; }
+  let html = `<div class="mcount">${all.length}人（隠し中 ${hidden}人）</div>`;
+  MGROUPS.forEach(g => {
+    const list = all.filter(m => mGroupOf(m) === g && (!q || m.name.includes(q) || (m.shozoku || "").includes(q)))
+      .sort((a, b) => ((a.active === false) - (b.active === false)) || (a.shozoku || "").localeCompare(b.shozoku || "", "ja") || byLen(a.name, b.name));
+    if (!list.length) return;
+    html += `<div class="mgroup">${g}<span>${list.length}人</span></div>` + list.map(m => `
+      <div class="mrow${m.active === false ? " off" : ""}"><b>${esc(m.name)}</b><span class="mso">${esc(m.shozoku || "")}</span>
+        ${m.active === false ? '<span class="tag">隠し中</span>' : ""}
+        <button type="button" class="btn ${m.active === false ? "primary" : "ghost"} small" data-act="memToggle" data-id="${m.id}">${m.active === false ? "表示する" : "隠す"}</button></div>`).join("");
+  });
+  el.innerHTML = html;
+}
+function toggleMember(id) {
+  const m = S.members.find(x => x.id === id); if (!m) return;
+  updateDoc(doc(db, "members", id), { active: m.active === false, updatedAt: serverTimestamp() })
+    .catch(e => { console.error(e); toast("変更できませんでした。もう一度お試しください"); });
+}
+function addMember() {
+  const name = $("madd-name").value.trim(), kubun = $("madd-kubun").value, shozoku = $("madd-shozoku").value.trim();
+  if (!name) { toast("名前を入れてください"); $("madd-name").focus(); return; }
+  if (/[.#$[\]/]/.test(name)) { toast("名前に使えない記号が入っています"); return; }
+  const dup = S.members.find(m => m.name === name);
+  if (dup) { toast(`「${name}」はもう名簿にあります${dup.active === false ? "（隠し中）" : ""}`); return; }
+  setDoc(doc(collection(db, "members")), { name, kubun, shozoku, active: true, source: "manual", createdAt: serverTimestamp(), updatedAt: serverTimestamp() })
+    .catch(e => { console.error(e); toast("追加できませんでした。もう一度お試しください"); });
+  $("madd-name").value = ""; $("madd-shozoku").value = "";
+  toast(`「${name}」を追加しました`);
+}
+// 日報アプリの名簿（Realtime Database の master/workers）を読んで、まだいない人だけ足す
+const NIPPO_WORKERS_URL = "https://yotsuba-nippo-default-rtdb.firebaseio.com/master/workers.json";
+async function importFromNippo() {
+  let workers;
+  try {
+    const res = await fetch(NIPPO_WORKERS_URL, { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    workers = Object.entries(await res.json() || {}).map(([key, w]) => ({ key, ...w }))
+      .filter(w => w && typeof w.name === "string" && w.name.trim());
+  } catch (e) {
+    console.error(e); toast("日報の名簿を読めませんでした。電波や日報アプリの設定を確認してください"); return;
+  }
+  const have = new Set(S.members.map(m => m.name));
+  const add = workers.filter(w => !have.has(w.name.trim()));
+  if (!add.length) { toast(`日報の名簿 ${workers.length}人は、全員もう入っています`); return; }
+  const hiddenNew = add.filter(w => w.active === false).length;
+  if (!confirm(`日報の名簿 ${workers.length}人のうち、まだいない ${add.length}人を足します。
+（すでにいる ${workers.length - add.length}人はそのまま。日報で隠している人は、ここでも隠した状態で入ります：${hiddenNew}人）
+
+取り込みますか？`)) return;
+  try {
+    for (let i = 0; i < add.length; i += 400) {
+      const b = writeBatch(db);
+      add.slice(i, i + 400).forEach(w => b.set(doc(collection(db, "members")), {
+        name: w.name.trim().slice(0, 30), kubun: mGroupOf(w), shozoku: String(w.shozoku || "").trim().slice(0, 30),
+        active: w.active !== false, source: "nippo", nippoKey: w.key, createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+      }));
+      await b.commit();
+    }
+    toast(`${add.length}人を名簿に足しました`);
+  } catch (e) { console.error(e); toast("取り込めませんでした。Firebase のルールを確認してください"); }
 }
 
 function saveSettings(form) {
   const f = new FormData(form);
   const list = k => [...new Set(String(f.get(k) || "").split(/\r?\n/).map(x => x.trim()).filter(Boolean))];
-  const people = list("people").map(x => x.slice(0, 40)), sites = list("sites").map(x => x.slice(0, 100));
+  const sites = list("sites").map(x => x.slice(0, 100));
   const lots = Array.from({ length: LOT_COUNT }, (_, i) => String(f.get(`lot${i}`) || "").trim());
   const days = Number(toHalf(String(f.get("shakenAlertDays") || "")));
   let err = "";
@@ -710,7 +820,7 @@ function saveSettings(form) {
   if (err) { const e = $("ferr"); e.textContent = err; e.hidden = false; return; }
 
   const b = writeBatch(db);
-  b.set(doc(db, "settings", "app"), { people, sites, lots, shakenAlertDays: days, updatedAt: serverTimestamp() }, { merge: true });
+  b.set(doc(db, "settings", "app"), { sites, lots, shakenAlertDays: days, updatedAt: serverTimestamp() }, { merge: true });
   // 駐車場の名前を変えたら、その名前の車の「置き場所」も書きかえる
   const old = S.settings.lots || [];
   const renames = new Map(old.map((o, i) => [o, lots[i]]).filter(([o, n]) => o && n && o !== n && !lots.includes(o)));
@@ -875,8 +985,9 @@ document.addEventListener("click", e => {
     case "goto": go({ name: val, id }); break;
     case "me": saveMe(val); break;
     case "meEdit": go({ name: "me" }); break;
-    case "whoOther": form.other = true; form.who = ""; render(); break;
-    case "whoMe": form.other = false; form.who = ""; render(); break;
+    case "whoOther": form.other = true; form.picking = true; form.whoQ = ""; form.err = ""; render(); break;
+    case "whoMe": form.other = false; form.picking = false; form.who = ""; form.err = ""; render(); break;
+    case "pickWho": form.who = val; form.picking = false; form.err = ""; render(); break;
     case "reserve": { const v = byId(id); if (v) doReserve(v); break; }
     case "return": { const v = byId(id); if (v) doReturn(v, val); break; }
     case "sym": toggleSym(val); break;
@@ -887,6 +998,9 @@ document.addEventListener("click", e => {
     case "edit": openModal(id); break;
     case "close": closeModal(); break;
     case "settings": openSettings(); break;
+    case "memImport": importFromNippo(); break;
+    case "memToggle": toggleMember(id); break;
+    case "memAdd": addMember(); break;
     case "retire": retireVehicle(modalId); break;
     case "restore": restoreVehicle(id); break;
     case "seed": seed(); break;
@@ -905,13 +1019,21 @@ document.addEventListener("change", e => {
     $("f-prev").innerHTML = `<div class="thumb"><img src="${pendingPhoto.preview}" alt=""></div>`;
   }
 });
+// 設定画面：名簿の検索、追加欄で Enter を押したとき
+document.addEventListener("input", e => { if (e.target.id === "memSearch") { memQuery = e.target.value; renderMemberList(); } });
+document.addEventListener("keydown", e => {
+  if (e.key !== "Enter" || !e.target.id) return;
+  if (e.target.id === "memSearch") e.preventDefault();
+  if (/^madd-/.test(e.target.id)) { e.preventDefault(); addMember(); }
+});
 document.addEventListener("submit", e => {
   if (e.target.id === "vform") { e.preventDefault(); saveVehicle(e.target); }
   if (e.target.id === "sform") { e.preventDefault(); saveSettings(e.target); }
-  if (e.target.id === "meform") { e.preventDefault(); saveMe(e.target.me.value); }
 });
 // 予約フォームの入力を覚えておく
 $("ph-screen").addEventListener("input", e => {
+  if (e.target.id === "meSearch") { meQuery = e.target.value; $("meList").innerHTML = nameChips(meQuery, ME, "me"); return; }
+  if (e.target.id === "whoSearch") { form.whoQ = e.target.value; $("whoList").innerHTML = nameChips(form.whoQ, form.who, "pickWho"); return; }
   const n = e.target.name;
   if (ui.screen.name === "repair" && n === "memo") rform.memo = e.target.value;
   if (ui.screen.name === "reserve" && ["from", "to", "who", "site", "siteOther"].includes(n)) form[n] = e.target.value;
@@ -959,6 +1081,10 @@ function startSync() {
     S.reservations = snapList(snap); done("r");
   }, onErr);
   onSnapshot(collection(db, "repairs"), snap => { S.repairs = snapList(snap); done("p"); }, onErr);
+  onSnapshot(collection(db, "members"), snap => {
+    S.members = snapList(snap); S.membersLoaded = true;
+    refresh(); renderMemberList();
+  }, e => { console.warn("名簿を読めません", e); S.membersLoaded = true; refresh(); });
   onSnapshot(doc(db, "settings", "app"), d => {
     S.settingsExists = d.exists();
     S.settings = { ...DEFAULT_SETTINGS, ...(d.data() || {}) };

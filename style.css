@@ -267,3 +267,25 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:3px solid v
 .days-in input{width:120px}
 .days-in span{font-weight:700}
 .modal textarea{resize:vertical;line-height:1.6}
+
+/* ---- 名簿（日報アプリと同じ選び方） ---- */
+.nsearch{margin:0 0 14px}
+.mgroup{font-weight:900;font-size:15px;color:var(--mute);margin:14px 0 8px;display:flex;align-items:baseline;gap:8px}
+.mgroup span{font-size:12px;font-weight:700}
+.ngrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.nchip{min-height:56px;padding:0 6px;background:var(--paper);border:1.5px solid var(--line-strong);border-radius:12px;font-size:17px;font-weight:700;line-height:1.2;word-break:break-all}
+.nchip.on{background:var(--steel);border-color:var(--steel);color:#fff}
+.picker{border:1.5px solid var(--line);border-radius:14px;padding:12px}
+.picker .mgroup:first-child{margin-top:0}
+/* 設定画面の名簿 */
+.modal{width:min(720px,100%)}
+.mtools{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.mtools input{flex:1;min-width:180px}
+.mlist{max-height:360px;overflow:auto;border:1.5px solid var(--line);border-radius:12px;padding:0 12px 10px;margin-top:10px}
+.mcount{font-size:13px;color:var(--mute);padding-top:10px}
+.mrow{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--line)}
+.mrow b{min-width:7em}
+.mrow .mso{flex:1;color:var(--mute);font-size:14px}
+.mrow.off b,.mrow.off .mso{opacity:.5}
+.madd{display:grid;grid-template-columns:1.2fr 1fr 1.4fr auto;gap:8px;margin-top:10px}
+@media (max-width:600px){.madd{grid-template-columns:1fr 1fr}}

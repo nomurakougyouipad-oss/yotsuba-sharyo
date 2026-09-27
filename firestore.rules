@@ -82,7 +82,21 @@ service cloud.firestore {
       allow delete: if signedIn() && (isSample() || onSampleVehicle());
     }
 
-    // ---- 設定（名前・現場・駐車場のリストなど） ----
+    // ---- 名簿（日報アプリと同じ形：名前・区分・所属・表示するか） ----
+    function validMember(d) {
+      return d.keys().hasAll(['name', 'kubun', 'active'])
+        && str(d.name, 30)
+        && d.kubun in ['自社', '常駐協力', '外注協力']
+        && optStr(d, 'shozoku', 30)
+        && d.active is bool;
+    }
+    match /members/{memberId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && validMember(request.resource.data);
+      // 消さない（隠すだけ。予約・修理の記録は名前で残る）
+    }
+
+    // ---- 設定（現場・駐車場のリスト、車検通知の日数など） ----
     function validSettings(d) {
       return (!('people' in d) || (d.people is list && d.people.size() <= 200))
         && (!('sites' in d) || (d.sites is list && d.sites.size() <= 300))
