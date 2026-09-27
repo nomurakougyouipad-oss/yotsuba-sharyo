@@ -6,6 +6,8 @@
   --use:#E08A1E; --use-bg:#FCEFD9;
   --fix:#C8443A; --fix-bg:#F9E1DE;
   --plate:#F5F7F2; --plate-ink:#1B222B;
+  /* 文字・枠線に使う色（ライトモードは上と同じ。ダークモードだけ明るくして背景に沈まないようにする） */
+  --steel-t:var(--steel); --free-t:var(--free); --use-t:var(--use); --fix-t:var(--fix); --line-strong:var(--line);
   box-sizing:border-box;
   padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
 }
@@ -13,19 +15,21 @@
   :root:not([data-theme="light"]){
     --bg:#171A1E; --paper:#22262C; --ink:#EEF0EC; --mute:#A3ABB5; --line:#3A4048;
     --free-bg:#1E3A2A; --use-bg:#3E2E15; --fix-bg:#3F2220; --plate:#F5F7F2;
+    --steel-t:#A9CBEF; --free-t:#6BD197; --use-t:#F2AE55; --fix-t:#FF8F85; --line-strong:#6B7480;
   }
 }
 :root[data-theme="dark"]{
   --bg:#171A1E; --paper:#22262C; --ink:#EEF0EC; --mute:#A3ABB5; --line:#3A4048;
   --free-bg:#1E3A2A; --use-bg:#3E2E15; --fix-bg:#3F2220; --plate:#F5F7F2;
+  --steel-t:#A9CBEF; --free-t:#6BD197; --use-t:#F2AE55; --fix-t:#FF8F85; --line-strong:#6B7480;
 }
 html{scroll-padding-top:env(safe-area-inset-top,0px)}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:"Zen Kaku Gothic New","Hiragino Sans","Yu Gothic",system-ui,sans-serif;font-size:16px;line-height:1.5}
 button{font:inherit;color:inherit;cursor:pointer}
-input,select,textarea{font:inherit;color:var(--ink);background:var(--paper);border:1.5px solid var(--line);border-radius:10px;padding:12px 14px;font-size:17px;width:100%}
-input:focus,select:focus,textarea:focus,button:focus-visible{outline:3px solid var(--steel);outline-offset:2px}
+input,select,textarea{font:inherit;color:var(--ink);background:var(--paper);border:1.5px solid var(--line-strong);border-radius:10px;padding:12px 14px;font-size:17px;width:100%}
+input:focus,select:focus,textarea:focus,button:focus-visible{outline:3px solid var(--steel-t);outline-offset:2px}
 
 /* ---- preview switcher ---- */
 .switch{display:flex;justify-content:center;gap:8px;padding:14px 12px 6px}
@@ -43,7 +47,7 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:3px solid v
 .tabs{position:absolute;left:0;right:0;bottom:0;display:flex;background:var(--paper);border-top:1.5px solid var(--line)}
 .tabs button{flex:1;background:none;border:0;padding:10px 0 12px;font-size:12px;color:var(--mute);display:flex;flex-direction:column;align-items:center;gap:2px}
 .tabs button .ic{font-size:22px;line-height:1}
-.tabs button.on{color:var(--steel);font-weight:700}
+.tabs button.on{color:var(--steel-t);font-weight:700}
 .tabs button .badge{position:absolute;margin-left:34px;margin-top:-2px;background:var(--fix);color:#fff;border-radius:999px;font-size:11px;padding:1px 6px;font-weight:700}
 
 /* ---- chips ---- */
@@ -73,9 +77,9 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:3px solid v
 .meta{flex:1;min-width:0}
 .meta .kind{font-weight:700;margin-top:6px}
 .meta .r1{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-right:4px}
-.shk{display:inline-flex;flex-direction:column;align-items:center;line-height:1.15;flex:none;font-size:12px;font-weight:900;padding:4px 10px;border-radius:10px;background:var(--use-bg);color:var(--use);white-space:nowrap}
+.shk{display:inline-flex;flex-direction:column;align-items:center;line-height:1.15;flex:none;font-size:12px;font-weight:900;padding:4px 10px;border-radius:10px;background:var(--use-bg);color:var(--use-t);white-space:nowrap}
 .shk b{font-size:15px}
-.shk.over{background:var(--fix-bg);color:var(--fix)}
+.shk.over{background:var(--fix-bg);color:var(--fix-t)}
 .meta .who{color:var(--mute);font-size:14px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* ---- detail ---- */
@@ -88,12 +92,12 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:3px solid v
 .row{display:flex;justify-content:space-between;align-items:baseline;padding:12px 2px;border-bottom:1.5px solid var(--line);gap:10px}
 .row .k{color:var(--mute);font-size:14px;flex:none}
 .row .v{font-weight:700;text-align:right}
-.row .v.warn{color:var(--fix)}
+.row .v.warn{color:var(--fix-t)}
 .actions{display:grid;gap:10px;margin:16px 0 6px}
 .btn{border:0;border-radius:14px;padding:16px;font-size:18px;font-weight:900;width:100%}
 .btn.primary{background:var(--steel);color:#fff}
-.btn.ghost{background:var(--paper);border:2px solid var(--steel);color:var(--steel)}
-.btn.danger{background:var(--fix-bg);color:var(--fix)}
+.btn.ghost{background:var(--paper);border:2px solid var(--steel-t);color:var(--steel-t)}
+.btn.danger{background:var(--fix-bg);color:var(--fix-t)}
 .btn.big{padding:22px;font-size:20px}
 .btn.free{background:var(--free);color:#fff}
 
@@ -118,7 +122,7 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:3px solid v
 .opt.on{border-color:var(--steel);background:var(--steel);color:#fff}
 .sympt{display:flex;flex-wrap:wrap;gap:8px}
 .sympt .chip{font-size:15px;padding:10px 14px}
-.photo-box{border:2px dashed var(--line);border-radius:14px;padding:22px;text-align:center;color:var(--mute);font-weight:700}
+.photo-box{border:2px dashed var(--line-strong);border-radius:14px;padding:22px;text-align:center;color:var(--mute);font-weight:700}
 .done{text-align:center;padding:40px 10px}
 .done .ok{width:84px;height:84px;border-radius:50%;background:var(--free);color:#fff;font-size:44px;display:flex;align-items:center;justify-content:center;margin:0 auto 18px;font-weight:900}
 .done h2{margin:0 0 6px;font-size:22px}
@@ -137,11 +141,11 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:3px solid v
 .li .grow{flex:1;min-width:0}
 .li .t{font-weight:700}
 .li .s{color:var(--mute);font-size:13px}
-.days{font-weight:900;font-size:15px;padding:6px 10px;border-radius:10px;background:var(--free-bg);color:var(--free);flex:none}
-.days.soon{background:var(--use-bg);color:var(--use)}
-.days.over{background:var(--fix-bg);color:var(--fix)}
-.tag{font-size:12px;font-weight:700;padding:3px 8px;border-radius:6px;background:var(--fix-bg);color:var(--fix)}
-.tag.done{background:var(--free-bg);color:var(--free)}
+.days{font-weight:900;font-size:15px;padding:6px 10px;border-radius:10px;background:var(--free-bg);color:var(--free-t);flex:none}
+.days.soon{background:var(--use-bg);color:var(--use-t)}
+.days.over{background:var(--fix-bg);color:var(--fix-t)}
+.tag{font-size:12px;font-weight:700;padding:3px 8px;border-radius:6px;background:var(--fix-bg);color:var(--fix-t)}
+.tag.done{background:var(--free-bg);color:var(--free-t)}
 
 /* ---- PC dashboard ---- */
 .pc{max-width:1180px;margin:0 auto 40px;padding:0 16px}
@@ -151,7 +155,7 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:3px solid v
 .counts{display:flex;gap:12px;margin-left:auto}
 .count{display:flex;align-items:baseline;gap:6px;padding:8px 16px;border-radius:12px;font-weight:900;font-size:22px}
 .count span{font-size:13px;font-weight:700}
-.count.free{background:var(--free-bg);color:var(--free)} .count.use{background:var(--use-bg);color:var(--use)} .count.fix{background:var(--fix-bg);color:var(--fix)}
+.count.free{background:var(--free-bg);color:var(--free-t)} .count.use{background:var(--use-bg);color:var(--use-t)} .count.fix{background:var(--fix-bg);color:var(--fix-t)}
 .grid2{display:grid;gap:16px}
 .stack{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;align-items:start}
 @media (max-width:900px){.stack{grid-template-columns:1fr}}
@@ -170,7 +174,7 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:3px solid v
 .dot.free{background:var(--free)} .dot.use{background:var(--use)} .dot.fix{background:var(--fix)}
 .table .st{font-weight:900;white-space:nowrap}
 .table tr.grp td{padding:14px 14px 6px;font-weight:900;font-size:15px;border-bottom:0;border-left:5px solid transparent;background:var(--paper)}
-.table tr.grp.use td{color:var(--use);border-left-color:var(--use)} .table tr.grp.free td{color:var(--free);border-left-color:var(--free)} .table tr.grp.fix td{color:var(--fix);border-left-color:var(--fix)}
+.table tr.grp.use td{color:var(--use-t);border-left-color:var(--use)} .table tr.grp.free td{color:var(--free-t);border-left-color:var(--free)} .table tr.grp.fix td{color:var(--fix-t);border-left-color:var(--fix)}
 .table tr.grp td span{font-size:13px;font-weight:700;opacity:.8;margin-left:8px}
 .table tr.grp td::before{content:"";display:inline-block;width:10px;height:10px;border-radius:50%;background:currentColor;margin-right:8px;vertical-align:1px}
 .table tr.vrow td:first-child{border-left:5px solid transparent}
@@ -199,18 +203,18 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:3px solid v
 .chip{min-height:40px}
 .card{cursor:pointer}
 .loading{padding:40px 18px;color:var(--mute);text-align:center}
-.errbar{background:var(--fix-bg);color:var(--fix);font-weight:700;border-radius:12px;padding:12px 14px;margin-bottom:12px;font-size:14px}
+.errbar{background:var(--fix-bg);color:var(--fix-t);font-weight:700;border-radius:12px;padding:12px 14px;margin-bottom:12px;font-size:14px}
 .pc .errbar{margin:0 0 16px}
 
 /* ---- PC: 表の行を押すと修正 ---- */
 .btn.small{padding:7px 12px;font-size:13px;border-radius:9px;width:auto;min-height:36px}
 .table tr.vrow{cursor:pointer}
-.table tr.vrow:hover td{background:color-mix(in srgb,var(--steel) 7%,var(--paper))}
+.table tr.vrow:hover td{background:color-mix(in srgb,var(--steel-t) 8%,var(--paper))}
 .retired summary{font-size:15px;font-weight:900;padding:14px 18px;cursor:pointer;color:var(--mute)}
 .retired[open] summary{border-bottom:1.5px solid var(--line)}
 .retired .table td{color:var(--mute)}
 .sample-note{color:var(--mute);font-size:13px;text-align:right;margin:4px 2px 0}
-.linkbtn{background:none;border:0;padding:4px 2px;color:var(--steel);text-decoration:underline;font-size:13px;font-weight:700}
+.linkbtn{background:none;border:0;padding:4px 2px;color:var(--steel-t);text-decoration:underline;font-size:13px;font-weight:700}
 
 /* ---- 車両の登録・修正（PCのみ） ---- */
 .overlay{position:fixed;inset:0;background:rgba(15,20,26,.45);display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto;z-index:50}
@@ -227,8 +231,8 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:3px solid v
 .seg label.chip{display:inline-flex;align-items:center;min-height:44px;margin:0;padding:8px 18px;font-size:15px;position:relative;cursor:pointer}
 .seg input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
 .seg label.chip:has(input:checked){background:var(--steel);color:#fff;border-color:var(--steel)}
-.seg label.chip:has(input:focus-visible){outline:3px solid var(--steel);outline-offset:2px}
-.ferr{color:var(--fix);font-weight:700;font-size:14px;margin:0 0 12px}
+.seg label.chip:has(input:focus-visible){outline:3px solid var(--steel-t);outline-offset:2px}
+.ferr{color:var(--fix-t);font-weight:700;font-size:14px;margin:0 0 12px}
 
 /* ---- お知らせ（画面下にふわっと出る） ---- */
 .toast{position:fixed;left:50%;bottom:calc(96px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:12px 18px;border-radius:12px;font-weight:700;font-size:15px;z-index:60;max-width:calc(100% - 32px);box-shadow:0 6px 20px rgba(0,0,0,.2)}
@@ -240,7 +244,7 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:3px solid v
 .photo-pick .thumb svg{width:96px}
 
 /* ---- 修理依頼（段階4） ---- */
-.tag.inrep{background:var(--use-bg);color:var(--use)}
+.tag.inrep{background:var(--use-bg);color:var(--use-t)}
 .photo-box{display:block;cursor:pointer;min-height:44px}
 .rphotos{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
 .rphoto{position:relative;aspect-ratio:4/3;border-radius:10px;overflow:hidden;background:var(--bg)}
