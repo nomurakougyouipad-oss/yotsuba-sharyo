@@ -152,7 +152,7 @@ function renderPhone() {
   if (!ME) { h.innerHTML = `<h1>はじめに</h1>`; s.innerHTML = errBar() + nameScreen(true); t.hidden = true; return; }
   t.hidden = false;
   t.innerHTML = [["cars", "🚐", "車両"], ["shaken", "📋", "車検"], ["repair", "🔧", "修理"]].map(([k, ic, l]) =>
-    `<button class="${ui.tab === k ? "on" : ""}" data-act="tab" data-val="${k}"><span class="ic">${ic}</span>${l}</button>`).join("");
+    `<button class="${ui.tab === k ? "on" : ""}" data-act="tab" data-val="${k}"><span class="ic">${ic}</span>${l}${k === "repair" && openCount() ? `<span class="badge">${openCount()}</span>` : ""}</button>`).join("");
   if (ui.screen.name === "me") {
     ui.backTo = { name: "list" };
     h.innerHTML = `<button class="back" data-act="back" aria-label="戻る">‹</button><h1>あなたの名前</h1>`;
@@ -165,7 +165,7 @@ function renderPhone() {
     pill = `<button class="me-pill" data-act="meEdit">${esc(ME)}</button>`;
     if (ui.tab === "cars") body = listCars();
     else if (ui.tab === "shaken") { title = "車検"; body = `<div class="empty">車検の一覧は、次の段階で使えるようになります</div>`; }
-    else { title = "修理依頼"; body = `<div class="empty">修理依頼の一覧は、次の段階で使えるようになります</div>`; }
+    else { title = "修理依頼"; body = listRepairs(); }
   } else if (sc.name === "done") {
     title = ""; body = doneScreen(sc);
   } else {
@@ -175,6 +175,7 @@ function renderPhone() {
     if (sc.name === "detail") { title = esc(v.kind); body = detail(v); }
     if (sc.name === "reserve") { title = "予約"; body = reserveForm(v); }
     if (sc.name === "return") { title = "返却"; body = returnForm(v); }
+    if (sc.name === "repair") { title = "修理を頼む"; body = repairForm(v); }
   }
   ui.backTo = back;
   h.innerHTML = `${back ? `<button class="back" data-act="back" aria-label="戻る">‹</button>` : ""}<h1>${title}</h1><span class="today">${d.getMonth() + 1}/${d.getDate()}（${DOW[d.getDay()]}）</span>${pill}`;
@@ -231,7 +232,7 @@ function detail(v) {
     : (st === "free" ? `<button class="btn primary" data-act="goto" data-val="reserve" data-id="${v.id}">この車を予約する</button>` : "");
   return `<div class="hero">${thumbHtml(v, true)}${plateHtml(v)}</div>
   <div class="rows">${rows.map(([k, val]) => `<div class="row"><span class="k">${k}</span><span class="v">${val}</span></div>`).join("")}</div>
-  <div class="actions">${actions}<button class="btn ghost" data-act="soon">修理を頼む</button></div>
+  <div class="actions">${actions}<button class="btn ghost" data-act="goto" data-val="repair" data-id="${v.id}">修理を頼む</button></div>
   ${calendar(v)}`;
 }
 
@@ -336,6 +337,99 @@ function doReturn(v, lot) {
   go({ name: "done", title: "返却しました", msg: `${lot} に置いてある、と記録しました` });
 }
 
+/* ---------- 修理依頼 ---------- */
+const SYMPTOMS = ["エンジン警告灯", "異音がする", "タイヤ", "ブレーキ", "エアコン", "傷・へこみ", "その他"];
+const REPAIR_TAG = { open: ["", "未対応"], in_repair: ["inrep", "修理中"], done: ["done", "対応済み"] };
+const MAX_REPAIR_PHOTOS = 10;
+const openCount = () => S.repairs.filter(r => r.status === "open").length;
+const repairDate = r => { const d = r.createdAt && r.createdAt.toDate ? r.createdAt.toDate() : new Date(); return `${d.getMonth() + 1}/${d.getDate()}`; };
+const repairKind = r => { const v = byId(r.vehicleId); return v ? esc(v.kind) : "（削除された車）"; };
+// 未対応・修理中を上に、それぞれ新しい順
+const sortedRepairs = list => [...list].sort((a, b) => ((a.status === "done") - (b.status === "done")) || (millis(b.createdAt) - millis(a.createdAt)));
+
+function listRepairs() {
+  if (!S.ready) return `<div class="loading">読み込み中…</div>`;
+  if (!S.repairs.length) return `<div class="empty">修理依頼はありません</div>`;
+  return sortedRepairs(S.repairs).map(r => {
+    const [cls, label] = REPAIR_TAG[r.status] || REPAIR_TAG.open;
+    return `
+  <div class="li"><div class="grow"><div class="t">${esc(repairText(r))}</div><div class="s">${repairKind(r)}　${repairDate(r)}　${esc(r.reportedBy || "")}</div></div>
+    <span class="tag ${cls}">${label}</span></div>`;
+  }).join("");
+}
+
+// 「修理を頼む」の入力中の内容
+const rform = { vid: null, sym: new Set(), memo: "", photos: [], err: "", busy: false, pct: 0 };
+function resetRform(vid) {
+  rform.photos.forEach(p => URL.revokeObjectURL(p.url));
+  Object.assign(rform, { vid, sym: new Set(), memo: "", photos: [], err: "", busy: false, pct: 0 });
+}
+function repairForm(v) {
+  if (rform.vid !== v.id) resetRform(v.id);
+  return `<div class="sheet-title">${esc(v.kind)}</div><p class="sub">${plateText(v)}</p>
+  <div class="field"><label>どこが悪い？（複数OK）</label><div class="sympt">${SYMPTOMS.map(x => `<button class="chip ${rform.sym.has(x) ? "on" : ""}" data-act="sym" data-val="${x}">${x}</button>`).join("")}</div></div>
+  <div class="field"><label for="r-memo">くわしく（任意）</label><textarea id="r-memo" name="memo" rows="3" maxlength="2000" placeholder="例：右に曲がるときにゴトゴト鳴る">${esc(rform.memo)}</textarea></div>
+  <div class="field">${rform.photos.length < MAX_REPAIR_PHOTOS
+    ? `<label class="photo-box">📷 写真をつける${rform.photos.length ? `（${rform.photos.length}枚）` : ""}<input type="file" id="r-photo" accept="image/*" multiple hidden></label>` : ""}
+    ${rform.photos.length ? `<div class="rphotos">${rform.photos.map((p, i) => `<div class="rphoto"><img src="${p.url}" alt=""><button class="rm" data-act="rmPhoto" data-val="${i}" aria-label="この写真をはずす">×</button></div>`).join("")}</div>` : ""}</div>
+  ${rform.err ? `<p class="ferr">${esc(rform.err)}</p>` : ""}
+  <div class="actions"><button class="btn primary big" data-act="sendRepair" data-id="${v.id}"${rform.busy ? " disabled" : ""}>${rform.busy ? (rform.photos.length ? `写真を送っています… ${rform.pct}%` : "送っています…") : "修理を頼む"}</button></div>`;
+}
+function toggleSym(x) { if (rform.busy) return; rform.sym.has(x) ? rform.sym.delete(x) : rform.sym.add(x); rform.err = ""; render(); }
+function addRepairPhotos(files) {
+  for (const f of files || []) {
+    if (rform.photos.length >= MAX_REPAIR_PHOTOS) { toast(`写真は${MAX_REPAIR_PHOTOS}枚までです`); break; }
+    if (f.type && !f.type.startsWith("image/")) continue;
+    rform.photos.push({ file: f, url: URL.createObjectURL(f) });
+  }
+  render();
+}
+function removeRepairPhoto(i) {
+  if (rform.busy) return;
+  const p = rform.photos.splice(i, 1)[0]; if (p) URL.revokeObjectURL(p.url);
+  render();
+}
+
+async function doRepair(v) {
+  if (rform.busy) return;
+  const memo = rform.memo.trim();
+  if (!rform.sym.size && !memo) { rform.err = "どこが悪いか選んでください"; render(); return; }
+  rform.err = ""; rform.busy = true; rform.pct = 0; render();
+  const ref = doc(collection(db, "repairs"));
+  let photos = [];
+  try {
+    if (rform.photos.length) {
+      photos = await uploadRepairPhotos(ref.id, rform.photos.map(p => p.file), pct => {
+        rform.pct = pct;
+        const b = document.querySelector('[data-act="sendRepair"]'); if (b) b.textContent = `写真を送っています… ${pct}%`;
+      });
+    }
+  } catch (e) {
+    console.error(e);
+    rform.busy = false; rform.err = "写真を送れませんでした。電波のよい所でもう一度押してください";
+    if (ui.screen.name === "repair") render();
+    return;
+  }
+  // 頼んだ人は自分の名前。出しただけでは「修理中」にしない（事務所が決める）
+  setDoc(ref, {
+    vehicleId: v.id, symptoms: SYMPTOMS.filter(x => rform.sym.has(x)), memo,
+    photoUrls: photos.map(p => p.photoUrl), photos, reportedBy: ME, status: "open",
+    createdAt: serverTimestamp(), doneAt: null,
+  }).catch(e => { console.error(e); toast("修理依頼を送れませんでした。もう一度お試しください"); });
+  resetRform(null);
+  go({ name: "done", title: "修理を頼みました", msg: "事務所に届きました" });
+}
+
+// PC: 修理依頼の処理
+function setRepairStatus(id, st) {
+  const r = S.repairs.find(x => x.id === id); if (!r) return;
+  const data = { status: st, updatedAt: serverTimestamp() };
+  if (st === "in_repair") data.inRepairAt = serverTimestamp();
+  if (st === "done") data.doneAt = serverTimestamp();
+  updateDoc(doc(db, "repairs", id), data).catch(e => { console.error(e); toast("変更できませんでした。もう一度お試しください"); });
+  toast(st === "in_repair" ? "修理中にしました" : (r.status === "in_repair" ? "修理完了にしました" : "対応済みにしました"));
+}
+
 function doneScreen(sc) {
   return `<div class="done"><div class="ok">✓</div><h2>${esc(sc.title)}</h2><p>${esc(sc.msg)}</p>
   <button class="btn primary" data-act="tab" data-val="cars">車両一覧へ戻る</button></div>`;
@@ -371,6 +465,9 @@ function renderPc() {
     <div class="counts"><div class="count free">${n("free")}<span>空き</span></div><div class="count use">${n("use")}<span>使用中</span></div><div class="count fix">${n("fix")}<span>修理中</span></div></div></div>
   ${errBar()}
   <div class="grid2">
+    <div class="stack">
+      ${repairPanel()}
+    </div>
     <div class="panel wide"><h2>全車両 <button class="btn primary small" data-act="add">＋ 車両を追加</button></h2>${table}</div>
     ${retired.length ? `<details class="panel retired"${ui.retiredOpen ? " open" : ""}><summary>廃車済み（${retired.length}台）</summary>
       <table class="table"><tbody>${retired.map(v => `<tr>
@@ -459,6 +556,27 @@ async function uploadRepairPhotos(repairId, files, onProgress) {
     out.push(await makePhotos(list[i], `repairs/${repairId}`, pct => onProgress && onProgress(Math.round((i + pct / 100) / list.length * 100))));
   }
   return out;
+}
+
+// PC: 修理依頼パネル（未対応と修理中。対応済みは出さない）
+function repairPanel() {
+  const list = sortedRepairs(S.repairs.filter(r => r.status !== "done"))
+    .sort((a, b) => (a.status === "in_repair") - (b.status === "in_repair")); // 未対応を上に
+  const n = openCount();
+  return `<div class="panel rpanel"><h2>修理依頼 <span class="tag">${n}件 未対応</span></h2>
+    ${list.length ? list.map(r => {
+      const photos = r.photos || [];
+      const btns = r.status === "in_repair"
+        ? `<button class="btn free small" data-act="repairSet" data-id="${r.id}" data-val="done">修理完了（空きに戻す）</button>`
+        : `<button class="btn ghost small" data-act="repairSet" data-id="${r.id}" data-val="done">対応済みにする</button>
+           <button class="btn danger small" data-act="repairSet" data-id="${r.id}" data-val="in_repair">修理中にする</button>`;
+      return `<div class="li"><div class="grow">
+          <div class="t">${r.status === "in_repair" ? '<span class="tag inrep">修理中</span> ' : ""}${esc(repairText(r))}</div>
+          <div class="s">${repairKind(r)}　${repairDate(r)}　${esc(r.reportedBy || "")}</div>
+          ${photos.length ? `<div class="rthumbs">${photos.map(p => `<a href="${esc(p.photoUrl)}" target="_blank" rel="noopener" title="大きく見る"><img src="${esc(p.thumbUrl || p.photoUrl)}" alt="修理の写真" loading="lazy"></a>`).join("")}</div>` : ""}
+        </div><div class="rbtns">${btns}</div></div>`;
+    }).join("") : `<div class="empty">未対応の依頼はありません</div>`}
+  </div>`;
 }
 
 /* ---------- 車両の登録・修正（PCのみ） ---------- */
@@ -661,7 +779,10 @@ document.addEventListener("click", e => {
     case "whoMe": form.other = false; form.who = ""; render(); break;
     case "reserve": { const v = byId(id); if (v) doReserve(v); break; }
     case "return": { const v = byId(id); if (v) doReturn(v, val); break; }
-    case "soon": toast("この機能は次の段階で使えるようになります"); break;
+    case "sym": toggleSym(val); break;
+    case "rmPhoto": removeRepairPhoto(Number(val)); break;
+    case "sendRepair": { const v = byId(id); if (v) doRepair(v); break; }
+    case "repairSet": setRepairStatus(id, val); break;
     case "add": openModal(null); break;
     case "edit": openModal(id); break;
     case "close": closeModal(); break;
@@ -673,6 +794,9 @@ document.addEventListener("click", e => {
 });
 document.addEventListener("change", e => {
   const el = e.target;
+  if (el.id === "r-photo") { // 修理を頼む：写真をつける（複数OK）
+    addRepairPhotos(el.files); el.value = "";
+  }
   if (el.id === "f-photo") { // PCの登録フォーム（保存を押したときに送る）
     const f = el.files && el.files[0]; if (!f) return;
     if (pendingPhoto) URL.revokeObjectURL(pendingPhoto.preview);
@@ -687,6 +811,7 @@ document.addEventListener("submit", e => {
 // 予約フォームの入力を覚えておく
 $("ph-screen").addEventListener("input", e => {
   const n = e.target.name;
+  if (ui.screen.name === "repair" && n === "memo") rform.memo = e.target.value;
   if (ui.screen.name === "reserve" && ["from", "to", "who", "site", "siteOther"].includes(n)) form[n] = e.target.value;
 });
 $("ph-screen").addEventListener("change", e => {
