@@ -333,3 +333,8 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
   :root{padding:0;background:linear-gradient(var(--steel) 50%,var(--paper) 50%)}
   body{background:transparent}
 }
+
+/* iPhone のホーム画面アプリで、アプリの枠が画面の下まで届かないとき、その分だけ延ばす（app.js が --ios-gap を入れる） */
+@media (max-width:899px){
+  .phone{bottom:calc(-1 * var(--ios-gap,0px))}
+}

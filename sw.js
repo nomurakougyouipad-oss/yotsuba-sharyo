@@ -2,7 +2,7 @@
 // - アプリの画面（HTML/CSS/JS/アイコン）は「新しいものを優先、つながらないときは保存済みを使う」
 // - Firebase の SDK とフォントは一度読んだら保存済みを使う（版が固定のため）
 // - データ（Firestore）と写真（Storage）は Firebase が自分で処理するので、ここでは触らない
-const CACHE = "sharyo-v3"; // 版を上げると、スマホに保存した古い画面・アイコンを入れ替える
+const CACHE = "sharyo-v4"; // 版を上げると、スマホに保存した古い画面・アイコンを入れ替える
 const SHELL = [
   "./", "./index.html", "./style.css", "./app.js", "./firebase-config.js", "./manifest.webmanifest",
   "./icons/icon-192.png?v=2", "./icons/icon-512.png?v=2", "./icons/icon-maskable-192.png?v=3", "./icons/icon-maskable-512.png?v=3",
@@ -26,7 +26,7 @@ self.addEventListener("fetch", e => {
   // 自分のサイト（GitHub Pages）: 新しいものを優先
   if (url.origin === self.location.origin) {
     e.respondWith(
-      fetch(req).then(res => {
+      fetch(req, { cache: "no-cache" }).then(res => {
         if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); }
         return res;
       }).catch(() => caches.match(req, { ignoreSearch: true }).then(r => r || caches.match("./index.html")))

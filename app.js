@@ -1092,61 +1092,25 @@ function startSync() {
   }, onErr);
 }
 
-/* ---------- 実機で数字を測る表示（一時的。?debug=1 のとき、またはヘッダーの日付を5回続けて押したときだけ） ---------- */
-const APP_VERSION = "2026-09-28 debug1";
-let debugOn = new URLSearchParams(location.search).get("debug") === "1";
-let debugTaps = [];
-document.addEventListener("click", e => {
-  if (!e.target.closest || !e.target.closest(".phone header .today")) return;
-  const now = Date.now();
-  debugTaps = debugTaps.filter(t => now - t < 3000).concat(now);
-  if (debugTaps.length >= 5) { debugTaps = []; debugOn = !debugOn; updateDebug(); }
-});
-let debugEl = null, debugCaches = "";
-function debugProbe(css) {
-  const el = document.createElement("div");
-  el.style.cssText = "position:fixed;left:-9999px;top:0;width:1px;visibility:hidden;pointer-events:none;" + css;
-  document.body.appendChild(el); return el;
-}
-function updateDebug() {
-  if (!debugOn) { if (debugEl) { debugEl.remove(); debugEl = null; } return; }
-  if (!debugEl) {
-    debugEl = document.createElement("div");
-    debugEl.style.cssText = "position:fixed;left:6px;right:6px;top:calc(env(safe-area-inset-top,0px) + 64px);z-index:200;pointer-events:none;"
-      + "background:rgba(0,0,0,.72);color:#fff;font:11px/1.45 ui-monospace,Menlo,Consolas,monospace;padding:6px 8px;border-radius:8px;white-space:pre-wrap";
-    document.body.appendChild(debugEl);
-    if (window.caches) caches.keys().then(k => { debugCaches = k.join(","); });
+/* ---------- iPhone のホーム画面から開いたときの高さの補正 ----------
+   上端をステータスバーの下まで広げる設定（black-translucent）のとき、iOS がアプリに伝える画面の高さが
+   上の余白の分だけ短くなることがあり、アプリの枠が画面の下まで届かない。短い分だけ枠を下へ延ばす。
+   iPhone のホーム画面アプリ以外（Safari・Android・PC）では何もしない。 */
+function fixIosStandaloneHeight() {
+  let gap = 0;
+  if (navigator.standalone === true) {
+    const portrait = matchMedia("(orientation: portrait)").matches;
+    const full = portrait ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
+    const d = Math.round(full - window.innerHeight);
+    if (d > 0 && d <= 100) gap = d;
   }
-  const px = v => Math.round(parseFloat(v) * 10) / 10;
-  const probes = {
-    sab: debugProbe("height:0;padding-bottom:env(safe-area-inset-bottom,0px)"),
-    sat: debugProbe("height:0;padding-top:env(safe-area-inset-top,0px)"),
-    vh: debugProbe("height:100vh"), dvh: debugProbe("height:100dvh"), svh: debugProbe("height:100svh"), lvh: debugProbe("height:100lvh"),
-  };
-  const cs = k => getComputedStyle(probes[k]);
-  const h = k => Math.round(probes[k].getBoundingClientRect().height);
-  const ph = $("phone").getBoundingClientRect(), tb = $("ph-tabs").getBoundingClientRect();
-  const btn = $("ph-tabs").querySelector("button");
-  const vv = window.visualViewport;
-  const standalone = navigator.standalone === true || matchMedia("(display-mode: standalone)").matches;
-  debugEl.textContent = [
-    `版: ${APP_VERSION}  保存: ${debugCaches || "-"}`,
-    `開き方: ${standalone ? "ホーム画面から" : "ブラウザ"}  画面: ${screen.width}x${screen.height} (x${Math.round(devicePixelRatio * 100) / 100})`,
-    `safe-area 下: ${px(cs("sab").paddingBottom)}  上: ${px(cs("sat").paddingTop)}`,
-    `innerHeight: ${innerHeight}  clientHeight: ${document.documentElement.clientHeight}  visualViewport: ${vv ? Math.round(vv.height) : "-"}`,
-    `100vh: ${h("vh")}  100dvh: ${h("dvh")}  100svh: ${h("svh")}  100lvh: ${h("lvh")}`,
-    `枠(.phone): 上 ${Math.round(ph.top)} 下 ${Math.round(ph.bottom)} 高さ ${Math.round(ph.height)}`,
-    `タブ: 上 ${Math.round(tb.top)} 下 ${Math.round(tb.bottom)} 高さ ${Math.round(tb.height)}  ボタン高さ ${btn ? Math.round(btn.getBoundingClientRect().height) : "-"}  下余白 ${px(getComputedStyle($("ph-tabs")).paddingBottom)}`,
-    `タブの下→画面の下: innerHeight基準 ${Math.round(innerHeight - tb.bottom)} / screen基準 ${Math.round(screen.height - tb.bottom)}`,
-  ].join("\n");
-  Object.values(probes).forEach(el => el.remove());
+  document.documentElement.style.setProperty("--ios-gap", gap + "px");
 }
-setInterval(updateDebug, 1000);
-addEventListener("resize", updateDebug);
-if (window.visualViewport) visualViewport.addEventListener("resize", updateDebug);
+addEventListener("resize", fixIosStandaloneHeight);
+addEventListener("orientationchange", () => setTimeout(fixIosStandaloneHeight, 300));
+fixIosStandaloneHeight();
 
 applyView();
-updateDebug();
 // ホーム画面に追加して使えるように（PWA）
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(e => console.warn(e));
 onAuthStateChanged(auth, user => { if (user) startSync(); });
