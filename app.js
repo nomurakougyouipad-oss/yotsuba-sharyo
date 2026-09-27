@@ -1093,8 +1093,9 @@ function startSync() {
 }
 
 /* ---------- 実機で数字を測る表示（一時的。?debug=1 のとき、またはヘッダーの日付を5回続けて押したときだけ） ---------- */
-const APP_VERSION = "2026-09-28 debug2";
-let debugOn = new URLSearchParams(location.search).get("debug") === "1";
+const APP_VERSION = "2026-09-28 debug3";
+let debugOn = new URLSearchParams(location.search).get("debug") === "1"
+  || navigator.standalone === true || matchMedia("(display-mode: standalone)").matches;
 let debugTaps = [];
 document.addEventListener("click", e => {
   if (!e.target.closest || !e.target.closest(".phone header .today")) return;
@@ -1116,6 +1117,20 @@ function tabDetail() {
   const cs = getComputedStyle(b);
   return `タブ内訳: 上線→アイコン ${Math.round(ic.top - tb.top)} / アイコン ${Math.round(ic.height)} / 上線→文字の下 ${Math.round(t.bottom - tb.top)} / 文字の下→ボタン下 ${Math.round(r.bottom - t.bottom)} / ボタン下→タブ下 ${Math.round(tb.bottom - r.bottom)}  ボタンの上下padding ${cs.paddingTop} ${cs.paddingBottom}`;
 }
+// 枠とタブが「画面に固定」になっているか（スマホ用の指定が効いているか）
+function layoutDetail() {
+  const p = getComputedStyle($("phone")), t = getComputedStyle($("ph-tabs"));
+  return `固定: 枠 position=${p.position} top=${p.top} bottom=${p.bottom}  タブ position=${t.position} bottom=${t.bottom}  スマホ用指定(幅899以下) ${matchMedia("(max-width:899px)").matches ? "効いている" : "効いていない"}  innerWidth ${innerWidth}`;
+}
+// ページ全体がスクロール・引っぱられていないか
+function scrollDetail() {
+  const d = document.documentElement, b = document.body, sc = $("ph-screen"), vv = window.visualViewport;
+  return `スクロール: ページ scrollY ${Math.round(scrollY)}  html.scrollTop ${Math.round(d.scrollTop)}  body.scrollTop ${Math.round(b.scrollTop)}
+` +
+    `  ページ全体の高さ(scrollHeight) html ${d.scrollHeight} body ${b.scrollHeight}  一覧(.screen) ${Math.round(sc.scrollTop)} / ${sc.scrollHeight - sc.clientHeight}
+` +
+    `  visualViewport: offsetTop ${vv ? Math.round(vv.offsetTop) : "-"} pageTop ${vv ? Math.round(vv.pageTop) : "-"} 拡大 ${vv ? Math.round(vv.scale * 100) / 100 : "-"}  html overflow ${getComputedStyle(d).overflowY} body overflow ${getComputedStyle(b).overflowY}`;
+}
 function updateDebug() {
   if (!debugOn) { if (debugEl) { debugEl.remove(); debugEl = null; } return; }
   if (!debugEl) {
@@ -1123,8 +1138,8 @@ function updateDebug() {
     debugEl.style.cssText = "position:fixed;left:6px;right:6px;top:calc(env(safe-area-inset-top,0px) + 64px);z-index:200;pointer-events:none;"
       + "background:rgba(0,0,0,.72);color:#fff;font:11px/1.45 ui-monospace,Menlo,Consolas,monospace;padding:6px 8px;border-radius:8px;white-space:pre-wrap";
     document.body.appendChild(debugEl);
-    if (window.caches) caches.keys().then(k => { debugCaches = k.join(","); });
   }
+  if (window.caches) caches.keys().then(k => { debugCaches = k.join(","); });
   const px = v => Math.round(parseFloat(v) * 10) / 10;
   const probes = {
     sab: debugProbe("height:0;padding-bottom:env(safe-area-inset-bottom,0px)"),
@@ -1147,13 +1162,20 @@ function updateDebug() {
     `タブ: 上 ${Math.round(tb.top)} 下 ${Math.round(tb.bottom)} 高さ ${Math.round(tb.height)}  ボタン高さ ${btn ? Math.round(btn.getBoundingClientRect().height) : "-"}  下余白 ${px(getComputedStyle($("ph-tabs")).paddingBottom)}`,
     `タブの下→画面の下: innerHeight基準 ${Math.round(innerHeight - tb.bottom)} / screen基準 ${Math.round(screen.height - tb.bottom)}`,
     tabDetail(),
+    layoutDetail(),
+    scrollDetail(),
     `ヘッダー高さ: ${Math.round($("ph-header").getBoundingClientRect().height)}  html高さ: ${Math.round(document.documentElement.getBoundingClientRect().height)}  body高さ: ${Math.round(document.body.getBoundingClientRect().height)}`,
   ].join("\n");
   Object.values(probes).forEach(el => el.remove());
 }
-setInterval(updateDebug, 1000);
+setInterval(updateDebug, 500);
 addEventListener("resize", updateDebug);
-if (window.visualViewport) visualViewport.addEventListener("resize", updateDebug);
+if (window.visualViewport) { visualViewport.addEventListener("resize", updateDebug); visualViewport.addEventListener("scroll", debugSoon); }
+let debugRaf = 0;
+function debugSoon() { if (!debugOn || debugRaf) return; debugRaf = requestAnimationFrame(() => { debugRaf = 0; updateDebug(); }); }
+addEventListener("scroll", debugSoon, { passive: true });
+document.addEventListener("scroll", debugSoon, { passive: true, capture: true });
+document.addEventListener("touchmove", debugSoon, { passive: true });
 
 applyView();
 updateDebug();
