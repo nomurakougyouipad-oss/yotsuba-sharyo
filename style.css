@@ -289,3 +289,28 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:3px solid v
 .mrow.off b,.mrow.off .mso{opacity:.5}
 .madd{display:grid;grid-template-columns:1.2fr 1fr 1.4fr auto;gap:8px;margin-top:10px}
 @media (max-width:600px){.madd{grid-template-columns:1fr 1fr}}
+
+/* ---- スマホ幅に収める（横にはみ出して画面がふわふわ動かないように） ---- */
+/* 画面全体は横に動かさない（指での拡大はそのままできる） */
+html,body{overflow-x:hidden;overscroll-behavior-x:none}
+.screen{overflow-x:hidden;overscroll-behavior-x:none}
+/* 入力欄は親の幅より広がらない。iPhone の日付・検索欄は独自の最小幅を持つので見た目をそろえる */
+input,select,textarea{min-width:0;max-width:100%}
+input[type="date"],input[type="search"]{-webkit-appearance:none;appearance:none;display:block}
+input[type="date"]{min-height:52px;text-align:left}
+input[type="date"]::-webkit-date-and-time-value{text-align:left}
+input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
+/* 横に並べる欄・ボタンは、中身が長くても列の幅に収める */
+.two{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.two > *,.ngrid > *,.rphotos > *,.lots-in > *,.madd > *{min-width:0}
+.ngrid{grid-template-columns:repeat(3,minmax(0,1fr))}
+.nchip{overflow:hidden;overflow-wrap:anywhere;word-break:normal}
+.chips{flex-wrap:wrap}
+/* 長い文は折り返す */
+.ferr,.errbar,.sub,.legend,.sheet-title,.done h2,.done p,.welcome h2,.row .v,.li .t,.li .s,.empty,.toast,.mgroup{overflow-wrap:anywhere;min-width:0}
+.row .v{min-width:0}
+.mine span{min-width:0;overflow-wrap:anywhere}
+.opt{min-width:0;overflow-wrap:anywhere}
+/* ヘッダー：長い名前でも右にはみ出さない */
+.phone header .today{flex:none;white-space:nowrap}
+.me-pill{flex:none;max-width:38vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
