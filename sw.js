@@ -2,10 +2,10 @@
 // - アプリの画面（HTML/CSS/JS/アイコン）は「新しいものを優先、つながらないときは保存済みを使う」
 // - Firebase の SDK とフォントは一度読んだら保存済みを使う（版が固定のため）
 // - データ（Firestore）と写真（Storage）は Firebase が自分で処理するので、ここでは触らない
-const CACHE = "sharyo-v2"; // 版を上げると、スマホに保存した古い画面・アイコンを入れ替える
+const CACHE = "sharyo-v3"; // 版を上げると、スマホに保存した古い画面・アイコンを入れ替える
 const SHELL = [
   "./", "./index.html", "./style.css", "./app.js", "./firebase-config.js", "./manifest.webmanifest",
-  "./icons/icon-192.png?v=2", "./icons/icon-512.png?v=2", "./icons/icon-maskable-192.png?v=2", "./icons/icon-maskable-512.png?v=2",
+  "./icons/icon-192.png?v=2", "./icons/icon-512.png?v=2", "./icons/icon-maskable-192.png?v=3", "./icons/icon-maskable-512.png?v=3",
   "./icons/apple-touch-icon.png?v=2", "./icons/favicon-32.png?v=2",
 ];
 
