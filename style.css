@@ -318,3 +318,18 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
 /* ヘッダー：長い名前でも右にはみ出さない */
 .phone header .today{flex:none;white-space:nowrap}
 .me-pill{flex:none;max-width:38vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ---- 下のタブ：アイコンと文字を真ん中に、iPhone のホームバーに重ならず余白は控えめ ---- */
+:root{--sab:env(safe-area-inset-bottom,0px)} /* iPhone の下の余白（ホームバーのぶん） */
+.tabs button{position:relative;justify-content:center;min-height:60px;padding:6px 0;gap:3px;font-size:13px;line-height:1.1}
+.tabs button .ic{font-size:26px}
+.tabs button .badge{top:5px;left:50%;margin:0 0 0 8px;min-width:20px;text-align:center;font-size:12px;padding:1px 6px}
+@media (max-width:899px){
+  /* ホームバーは下から約13px。その上に文字が来るよう、余白は iPhone の値から10px減らす（最低6px） */
+  .tabs{padding-bottom:max(6px,calc(var(--sab) - 10px))}
+  .screen{padding-bottom:calc(84px + var(--sab))}
+  .toast{bottom:calc(84px + var(--sab))}
+  /* 画面の枠のすき間に地の色が見えても、上はヘッダー・下はタブと同じ色でつながるように */
+  :root{padding:0;background:linear-gradient(var(--steel) 50%,var(--paper) 50%)}
+  body{background:transparent}
+}
