@@ -1,0 +1,32 @@
+rules_version = '2';
+
+// 社用車管理アプリ（yotsuba-sharyo）Storage ルール
+// - アプリを開いた人（匿名ログイン済み）だけが写真をアップロードできる
+// - 画像のみ・1枚10MBまで（アプリ側で長辺1280pxに縮小してから送る予定）
+// - 置き場所は vehicles/{車ID}/... と repairs/{修理ID}/... だけ
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+    function validImage() {
+      return request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    match /vehicles/{vehicleId}/{fileName} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && validImage();
+      allow delete: if signedIn();
+    }
+
+    match /repairs/{repairId}/{fileName} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && validImage();
+      allow delete: if signedIn();
+    }
+
+    // それ以外はすべて禁止
+  }
+}

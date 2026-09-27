@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2C4966">
+<title>社用車管理</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- PC（画面が広いとき）だけ出る切り替え -->
+<div class="switch" id="switch" hidden>
+  <button id="swPhone" data-act="view" data-val="phone">スマホ版</button>
+  <button id="swPc" data-act="view" data-val="pc">PC版ダッシュボード</button>
+</div>
+
+<!-- ================= スマホ版 ================= -->
+<div class="phone" id="phone">
+  <header id="ph-header"><h1>社用車</h1></header>
+  <div class="screen" id="ph-screen"><div class="loading">読み込み中…</div></div>
+  <nav class="tabs" id="ph-tabs"></nav>
+</div>
+
+<!-- ================= PC版ダッシュボード ================= -->
+<div class="pc" id="pc" hidden></div>
+
+<!-- 車両の登録・修正（PCのみ） -->
+<div id="modal" hidden></div>
+<div class="toast" id="toast" role="status" hidden></div>
+
+<noscript><p style="text-align:center">JavaScript を有効にしてください</p></noscript>
+<script type="module" src="app.js"></script>
+</body>
+</html>

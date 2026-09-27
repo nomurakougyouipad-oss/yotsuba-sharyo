@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>社用車管理 試作</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#EEF0EC; --paper:#FFFFFF; --ink:#1B222B; --mute:#5C6672; --line:#D9DDD6;
+  --steel:#2C4966; --steel-ink:#FFFFFF;
+  --free:#2E9E5B; --free-bg:#E3F5EA;
+  --use:#E08A1E; --use-bg:#FCEFD9;
+  --fix:#C8443A; --fix-bg:#F9E1DE;
+  --plate:#F5F7F2; --plate-ink:#1B222B;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#171A1E; --paper:#22262C; --ink:#EEF0EC; --mute:#A3ABB5; --line:#3A4048;
+    --free-bg:#1E3A2A; --use-bg:#3E2E15; --fix-bg:#3F2220; --plate:#F5F7F2;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#171A1E; --paper:#22262C; --ink:#EEF0EC; --mute:#A3ABB5; --line:#3A4048;
+  --free-bg:#1E3A2A; --use-bg:#3E2E15; --fix-bg:#3F2220; --plate:#F5F7F2;
+}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Zen Kaku Gothic New","Hiragino Sans","Yu Gothic",system-ui,sans-serif;font-size:16px;line-height:1.5}
+button{font:inherit;color:inherit;cursor:pointer}
+input,select,textarea{font:inherit;color:var(--ink);background:var(--paper);border:1.5px solid var(--line);border-radius:10px;padding:12px 14px;font-size:17px;width:100%}
+input:focus,select:focus,textarea:focus,button:focus-visible{outline:3px solid var(--steel);outline-offset:2px}
+
+/* ---- preview switcher ---- */
+.switch{display:flex;justify-content:center;gap:8px;padding:14px 12px 6px}
+.switch button{border:1.5px solid var(--line);background:var(--paper);border-radius:999px;padding:8px 18px;font-weight:700}
+.switch button.on{background:var(--steel);color:#fff;border-color:var(--steel)}
+.note{text-align:center;color:var(--mute);font-size:13px;margin:0 0 10px}
+
+/* ---- phone frame ---- */
+.phone{width:min(392px,100%);margin:0 auto 40px;background:var(--paper);border-radius:28px;border:1.5px solid var(--line);overflow:hidden;display:flex;flex-direction:column;height:min(780px,92vh);position:relative}
+.phone header{background:var(--steel);color:var(--steel-ink);padding:14px 18px 12px;display:flex;align-items:center;gap:10px;min-height:58px}
+.phone header h1{font-size:20px;margin:0;font-weight:900;letter-spacing:.02em;flex:1}
+.phone header .today{font-size:14px;opacity:.85}
+.back{background:none;border:0;color:#fff;font-size:22px;padding:0 6px 0 0;line-height:1}
+.screen{flex:1;overflow:auto;padding:14px 14px 90px;-webkit-overflow-scrolling:touch}
+.tabs{position:absolute;left:0;right:0;bottom:0;display:flex;background:var(--paper);border-top:1.5px solid var(--line)}
+.tabs button{flex:1;background:none;border:0;padding:10px 0 12px;font-size:12px;color:var(--mute);display:flex;flex-direction:column;align-items:center;gap:2px}
+.tabs button .ic{font-size:22px;line-height:1}
+.tabs button.on{color:var(--steel);font-weight:700}
+.tabs button .badge{position:absolute;margin-left:34px;margin-top:-2px;background:var(--fix);color:#fff;border-radius:999px;font-size:11px;padding:1px 6px;font-weight:700}
+
+/* ---- chips ---- */
+.chips{display:flex;gap:8px;margin-bottom:8px}
+.chips.types{margin-bottom:12px}
+.chips.types .chip{font-size:13px;padding:6px 12px;background:var(--bg);border-color:transparent}
+.chips.types .chip.on{background:var(--steel);color:#fff;border-color:var(--steel)}
+.chip{border:1.5px solid var(--line);background:var(--paper);border-radius:999px;padding:7px 14px;font-weight:700;font-size:14px}
+.chip.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.chip .n{opacity:.7;margin-left:4px;font-weight:500}
+
+/* ---- vehicle card ---- */
+.card{border:1.5px solid var(--line);border-radius:16px;overflow:hidden;background:var(--paper);margin-bottom:12px;text-align:left;width:100%;padding:0;display:block}
+.card .band{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 14px;color:#fff;font-weight:900;font-size:15px}
+.card .band .period{font-size:15px;font-weight:700;opacity:.95}
+.card .band .period small{font-size:12px;opacity:.85;margin-right:4px}
+.band.free{background:var(--free)} .band.use{background:var(--use)} .band.fix{background:var(--fix)}
+.card .body{display:flex;gap:12px;padding:12px 14px}
+.thumb{width:92px;height:68px;border-radius:10px;flex:none;display:flex;align-items:center;justify-content:center;background:var(--bg)}
+.thumb svg{width:78px;height:auto}
+.thumb img{width:100%;height:100%;object-fit:cover;border-radius:inherit}
+.photo-btn{margin-top:-2px;background:none;border:1.5px solid var(--line);border-radius:999px;padding:6px 14px;font-size:14px;font-weight:700;color:var(--mute)}
+.table .thumb{width:72px;height:50px;border-radius:8px}
+.table .thumb svg{width:60px}
+.plate{display:inline-block;background:var(--plate);color:var(--plate-ink);border:2px solid #333;border-radius:6px;padding:2px 10px;font-weight:900;font-size:18px;letter-spacing:.06em;line-height:1.3;white-space:nowrap}
+.plate small{display:block;font-size:11px;font-weight:700;letter-spacing:.1em;line-height:1.1}
+.meta{flex:1;min-width:0}
+.meta .kind{font-weight:700;margin-top:6px}
+.meta .r1{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-right:4px}
+.shk{display:inline-flex;flex-direction:column;align-items:center;line-height:1.15;flex:none;font-size:12px;font-weight:900;padding:4px 10px;border-radius:10px;background:var(--use-bg);color:var(--use);white-space:nowrap}
+.shk b{font-size:15px}
+.shk.over{background:var(--fix-bg);color:var(--fix)}
+.meta .who{color:var(--mute);font-size:14px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ---- detail ---- */
+.hero{display:flex;flex-direction:column;align-items:center;gap:10px;padding:8px 0 14px}
+.hero .thumb{width:100%;height:190px}
+.hero .thumb svg{width:230px}
+.status-pill{display:inline-block;color:#fff;font-weight:900;padding:6px 16px;border-radius:999px;font-size:16px}
+.status-pill.free{background:var(--free)} .status-pill.use{background:var(--use)} .status-pill.fix{background:var(--fix)}
+.rows{border-top:1.5px solid var(--line)}
+.row{display:flex;justify-content:space-between;align-items:baseline;padding:12px 2px;border-bottom:1.5px solid var(--line);gap:10px}
+.row .k{color:var(--mute);font-size:14px;flex:none}
+.row .v{font-weight:700;text-align:right}
+.row .v.warn{color:var(--fix)}
+.actions{display:grid;gap:10px;margin:16px 0 6px}
+.btn{border:0;border-radius:14px;padding:16px;font-size:18px;font-weight:900;width:100%}
+.btn.primary{background:var(--steel);color:#fff}
+.btn.ghost{background:var(--paper);border:2px solid var(--steel);color:var(--steel)}
+.btn.danger{background:var(--fix-bg);color:var(--fix)}
+.btn.big{padding:22px;font-size:20px}
+.btn.free{background:var(--free);color:#fff}
+
+/* ---- calendar ---- */
+.cal{margin-top:16px}
+.cal h3{font-size:15px;margin:0 0 8px;font-weight:700}
+.cal .grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.cal .d{aspect-ratio:1;display:flex;align-items:center;justify-content:center;border-radius:8px;font-size:14px;background:var(--bg)}
+.cal .dow{background:none;color:var(--mute);font-size:12px;aspect-ratio:auto;padding:2px 0}
+.cal .d.use{background:var(--use);color:#fff;font-weight:700}
+.cal .d.today{outline:2px solid var(--ink);outline-offset:-2px;font-weight:900}
+.cal .d.blank{background:none}
+.legend{font-size:13px;color:var(--mute);margin-top:8px}
+.legend i{display:inline-block;width:12px;height:12px;background:var(--use);border-radius:3px;vertical-align:-1px;margin-right:4px}
+
+/* ---- forms ---- */
+.field{margin-bottom:14px}
+.field label{display:block;font-weight:700;margin-bottom:6px;font-size:15px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.opts{display:grid;gap:10px}
+.opt{border:2px solid var(--line);border-radius:14px;padding:18px;font-size:19px;font-weight:900;background:var(--paper);text-align:left;display:flex;align-items:center;justify-content:space-between}
+.opt.on{border-color:var(--steel);background:var(--steel);color:#fff}
+.sympt{display:flex;flex-wrap:wrap;gap:8px}
+.sympt .chip{font-size:15px;padding:10px 14px}
+.photo-box{border:2px dashed var(--line);border-radius:14px;padding:22px;text-align:center;color:var(--mute);font-weight:700}
+.done{text-align:center;padding:40px 10px}
+.done .ok{width:84px;height:84px;border-radius:50%;background:var(--free);color:#fff;font-size:44px;display:flex;align-items:center;justify-content:center;margin:0 auto 18px;font-weight:900}
+.done h2{margin:0 0 6px;font-size:22px}
+.done p{color:var(--mute);margin:0 0 24px}
+.me-pill{background:rgba(255,255,255,.18);border:0;color:#fff;border-radius:999px;padding:5px 12px;font-size:13px;font-weight:700}
+.mine{display:flex;align-items:center;justify-content:space-between;border:2px solid var(--steel);background:var(--steel);color:#fff;border-radius:14px;padding:14px 16px;font-size:19px;font-weight:900}
+.mine .sw{background:rgba(255,255,255,.2);border:0;color:#fff;border-radius:999px;padding:6px 12px;font-size:13px;font-weight:700}
+.welcome{padding:10px 0}
+.welcome h2{font-size:22px;margin:0 0 4px}
+.sheet-title{font-size:20px;font-weight:900;margin:4px 0 14px}
+.sub{color:var(--mute);font-size:14px;margin:-8px 0 14px}
+
+/* ---- lists (shaken / repair) ---- */
+.li{display:flex;align-items:center;gap:12px;padding:12px 4px;border-bottom:1.5px solid var(--line)}
+.li .plate{font-size:15px}
+.li .grow{flex:1;min-width:0}
+.li .t{font-weight:700}
+.li .s{color:var(--mute);font-size:13px}
+.days{font-weight:900;font-size:15px;padding:6px 10px;border-radius:10px;background:var(--free-bg);color:var(--free);flex:none}
+.days.soon{background:var(--use-bg);color:var(--use)}
+.days.over{background:var(--fix-bg);color:var(--fix)}
+.tag{font-size:12px;font-weight:700;padding:3px 8px;border-radius:6px;background:var(--fix-bg);color:var(--fix)}
+.tag.done{background:var(--free-bg);color:var(--free)}
+
+/* ---- PC dashboard ---- */
+.pc{max-width:1180px;margin:0 auto 40px;padding:0 16px}
+.pc .top{display:flex;align-items:baseline;gap:16px;padding:10px 0 14px;flex-wrap:wrap}
+.pc .top h1{font-size:26px;margin:0;font-weight:900}
+.pc .top .today{color:var(--mute)}
+.counts{display:flex;gap:12px;margin-left:auto}
+.count{display:flex;align-items:baseline;gap:6px;padding:8px 16px;border-radius:12px;font-weight:900;font-size:22px}
+.count span{font-size:13px;font-weight:700}
+.count.free{background:var(--free-bg);color:var(--free)} .count.use{background:var(--use-bg);color:var(--use)} .count.fix{background:var(--fix-bg);color:var(--fix)}
+.grid2{display:grid;gap:16px}
+.stack{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;align-items:start}
+@media (max-width:900px){.stack{grid-template-columns:1fr}}
+.pc .li .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.panel{background:var(--paper);border:1.5px solid var(--line);border-radius:16px;overflow:hidden}
+.panel h2{font-size:16px;margin:0;padding:14px 18px;border-bottom:1.5px solid var(--line);font-weight:900;display:flex;justify-content:space-between;align-items:center}
+.panel h2 .tag{font-size:12px}
+.table{width:100%;border-collapse:collapse}
+.table th{font-size:13px;color:var(--mute);text-align:left;padding:10px 12px;font-weight:700;border-bottom:1.5px solid var(--line);white-space:nowrap}
+.table td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:middle;white-space:nowrap}
+.table td.kind{font-weight:700}
+.panel.wide{overflow-x:auto}
+.table .days{display:inline-block}
+.table tr:last-child td{border-bottom:0}
+.dot{display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:8px;vertical-align:-1px}
+.dot.free{background:var(--free)} .dot.use{background:var(--use)} .dot.fix{background:var(--fix)}
+.table .st{font-weight:900;white-space:nowrap}
+.table tr.grp td{padding:14px 14px 6px;font-weight:900;font-size:15px;border-bottom:0;border-left:5px solid transparent;background:var(--paper)}
+.table tr.grp.use td{color:var(--use);border-left-color:var(--use)} .table tr.grp.free td{color:var(--free);border-left-color:var(--free)} .table tr.grp.fix td{color:var(--fix);border-left-color:var(--fix)}
+.table tr.grp td span{font-size:13px;font-weight:700;opacity:.8;margin-left:8px}
+.table tr.grp td::before{content:"";display:inline-block;width:10px;height:10px;border-radius:50%;background:currentColor;margin-right:8px;vertical-align:1px}
+.table tr.vrow td:first-child{border-left:5px solid transparent}
+.table tr.vrow.use td:first-child{border-left-color:var(--use)} .table tr.vrow.free td:first-child{border-left-color:var(--free)} .table tr.vrow.fix td:first-child{border-left-color:var(--fix)}
+.table tr.vrow.use td{background:color-mix(in srgb,var(--use) 3%,var(--paper))} .table tr.vrow.free td{background:color-mix(in srgb,var(--free) 3%,var(--paper))} .table tr.vrow.fix td{background:color-mix(in srgb,var(--fix) 3%,var(--paper))}
+.table .plate{font-size:14px;padding:1px 8px}
+.pc .li{padding:12px 18px}
+.empty{padding:20px 18px;color:var(--mute);text-align:center}
+.pc .btn.small{padding:7px 12px;font-size:13px;border-radius:9px;width:auto}
+</style>
+</head>
+<body>
+
+<div class="switch">
+  <button id="swPhone" class="on" onclick="setView('phone')">スマホ版</button>
+  <button id="swPc" onclick="setView('pc')">PC版ダッシュボード</button>
+</div>
+<p class="note">試作です。押して動かせます（データはこの画面の中だけ）</p>
+
+<!-- ================= PHONE ================= -->
+<div class="phone" id="phone">
+  <header id="ph-header"></header>
+  <div class="screen" id="ph-screen"></div>
+  <nav class="tabs" id="ph-tabs"></nav>
+</div>
+
+<!-- ================= PC ================= -->
+<div class="pc" id="pc" hidden></div>
+
+<script>
+/* ---------- sample data ---------- */
+const TODAY = new Date(2026,8,24); // 2026-09-24
+const LOTS = ["本社","松前工場","伊予工場"];
+const PEOPLE = ["野村","田中","佐藤","山本","鈴木","高橋"];
+const SITES = ["東レ 定修","太陽石油","黒藤川発電所","熊本 浄化センター","松前工場 内作"];
+
+const V = [
+  {id:1, plate:["愛媛 300","あ 12-34"], kind:"ハイエース（バン）", type:"バン", color:"#dfe4ea", shaken:"2026-10-12", lot:"本社", use:{who:"田中",site:"東レ 定修",from:"2026-09-22",to:"2026-09-26"}},
+  {id:2, plate:["愛媛 400","い 56-78"], kind:"ハイゼット（軽トラ）", type:"トラック", color:"#f3f3f3", shaken:"2027-03-05", lot:"松前工場", use:null},
+  {id:3, plate:["愛媛 100","う 90-12"], kind:"ダイナ 2t（平ボディ）", type:"トラック", color:"#cfd6de", shaken:"2026-11-30", lot:"伊予工場", use:null},
+  {id:4, plate:["愛媛 500","え 34-56"], kind:"プロボックス", type:"普通車", color:"#f7f7f7", shaken:"2026-09-30", lot:"本社", use:{who:"佐藤",site:"太陽石油",from:"2026-09-24",to:"2026-09-24"}},
+  {id:5, plate:["愛媛 100","お 78-90"], kind:"エルフ 3t（ユニック）", type:"トラック", color:"#c9d1d9", shaken:"2027-01-18", lot:"松前工場", use:null, fix:"クレーン警報が鳴る"},
+  {id:6, plate:["愛媛 580","か 11-22"], kind:"N-BOX", type:"普通車", color:"#eef1f4", shaken:"2027-06-02", lot:"本社", use:{who:"山本",site:"黒藤川発電所",from:"2026-09-23",to:"2026-09-25"}},
+  {id:7, plate:["愛媛 400","き 33-44"], kind:"キャラバン（バン）", type:"バン", color:"#e5e9ee", shaken:"2026-12-14", lot:"伊予工場", use:null},
+  {id:8, plate:["愛媛 300","く 55-66"], kind:"タウンエース（バン）", type:"バン", color:"#f0f0f0", shaken:"2027-02-27", lot:"松前工場", use:null},
+];
+// reservations beyond today (for calendar)
+const RES = [
+  {vid:2, who:"鈴木", site:"熊本 浄化センター", from:"2026-09-28", to:"2026-10-02"},
+  {vid:3, who:"高橋", site:"東レ 定修", from:"2026-09-25", to:"2026-09-25"},
+  {vid:7, who:"田中", site:"太陽石油", from:"2026-10-06", to:"2026-10-08"},
+];
+const REPAIRS = [
+  {vid:5, when:"2026-09-21", who:"佐藤", text:"クレーン警報が鳴る", done:false},
+  {vid:1, when:"2026-09-10", who:"山本", text:"左後ろタイヤ空気が減りやすい", done:true},
+];
+
+/* ---------- helpers ---------- */
+const fmt = d => `${d.getMonth()+1}/${d.getDate()}`;
+const ymd = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+const parse = s => { const [y,m,d]=s.split("-").map(Number); return new Date(y,m-1,d); };
+const daysTo = s => Math.round((parse(s)-TODAY)/86400000);
+const jp = s => { const d=parse(s); return `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日`; };
+function status(v){ return v.fix ? "fix" : (v.use ? "use" : "free"); }
+const LABEL = {free:"空き", use:"使用中", fix:"修理中"};
+function carSvg(color){
+  return `<svg viewBox="0 0 120 56" xmlns="http://www.w3.org/2000/svg"><path d="M14 40h92a4 4 0 0 0 4-4v-9c0-3-2-5-5-6l-14-3-12-11a6 6 0 0 0-4-2H38a6 6 0 0 0-5 3l-8 11-11 3c-3 1-5 3-5 6v8a4 4 0 0 0 4 4z" fill="${color}" stroke="#39424d" stroke-width="2.5" stroke-linejoin="round"/><path d="M42 12h28l9 10H35z" fill="#b8d8ee" stroke="#39424d" stroke-width="2"/><circle cx="34" cy="42" r="8" fill="#2a2f36"/><circle cx="34" cy="42" r="3.5" fill="#9aa4ae"/><circle cx="90" cy="42" r="8" fill="#2a2f36"/><circle cx="90" cy="42" r="3.5" fill="#9aa4ae"/></svg>`;
+}
+function thumbHtml(v){ return `<div class="thumb" aria-hidden="true">${v.photo?`<img src="${v.photo}" alt="">`:carSvg(v.color)}</div>`; }
+function setPhoto(id,input){ const f=input.files&&input.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ V.find(x=>x.id===id).photo=r.result; render(); }; r.readAsDataURL(f); }
+function plateHtml(v,small){ return `<span class="plate"${small?' style="font-size:15px"':''}><small>${v.plate[0]}</small>${v.plate[1]}</span>`; }
+function shakenTag(v){ const d=daysTo(v.shaken); if(d>30) return ""; return `<span class="shk ${d<0?"over":""}"><span>🔔 車検</span><b>${d<0?`${-d}日超過`:(d===0?"今日":`あと${d}日`)}</b></span>`; }
+function bandExtra(v){
+  if(v.use) return `<span class="period">${fmt(parse(v.use.from))}〜${fmt(parse(v.use.to))}</span>`;
+  const next=RES.filter(r=>r.vid===v.id&&parse(r.from)>TODAY).sort((a,b)=>a.from>b.from?1:-1)[0];
+  if(!v.fix&&next) return `<span class="period"><small>次の予約</small>${fmt(parse(next.from))}〜</span>`;
+  return "";
+}
+function useText(v){ return v.use ? `${v.use.who}さん → ${v.use.site}` : (v.fix ? `修理待ち：${v.fix}` : `${v.lot} にあります`); }
+function shakenClass(v){ const d=daysTo(v.shaken); return d<0?"over":(d<=30?"soon":""); }
+function shakenText(v){ const d=daysTo(v.shaken); return d<0?`${-d}日 超過`:(d===0?"今日":`あと ${d}日`); }
+
+/* ---------- phone state ---------- */
+let ME=""; try{ ME=localStorage.getItem("sharyo_me")||""; }catch(e){}
+function saveMe(n){ n=(n||"").trim(); if(!n) return; ME=n; try{ localStorage.setItem("sharyo_me",n); }catch(e){} screen={name:"list"}; render(); }
+let view="phone", tab="cars", screen={name:"list"}, filter="all", tfilter="all";
+const form = {};
+
+function setView(v){ view=v; document.getElementById("phone").hidden = v!=="phone"; document.getElementById("pc").hidden = v!=="pc";
+  document.getElementById("swPhone").classList.toggle("on",v==="phone"); document.getElementById("swPc").classList.toggle("on",v==="pc"); render(); }
+function go(s){ screen=s; render(); }
+function setTab(t){ tab=t; screen={name:"list"}; render(); }
+
+function render(){ if(view==="phone") renderPhone(); else renderPc(); }
+
+function renderPhone(){
+  const h=document.getElementById("ph-header"), s=document.getElementById("ph-screen"), t=document.getElementById("ph-tabs");
+  const openRepairs = REPAIRS.filter(r=>!r.done).length;
+  t.innerHTML = [["cars","🚐","車両"],["shaken","📋","車検"],["repair","🔧","修理"]].map(([k,ic,l])=>
+    `<button class="${tab===k?"on":""}" onclick="setTab('${k}')"><span class="ic">${ic}</span>${l}${k==="repair"&&openRepairs?`<span class="badge">${openRepairs}</span>`:""}</button>`).join("");
+
+  let title="社用車", back=null, body="", pill="";
+  if(!ME){ h.innerHTML=`<h1>はじめに</h1>`; s.innerHTML=nameScreen(true); t.innerHTML=""; return; }
+  if(screen.name==="me"){ h.innerHTML=`<button class="back" onclick='go({name:"list"})' aria-label="戻る">‹</button><h1>あなたの名前</h1>`; s.innerHTML=nameScreen(false); return; }
+  if(screen.name==="list"){ pill=`<button class="me-pill" onclick='go({name:"me"})'>${ME}</button>`;
+    if(tab==="cars"){ body=listCars(); }
+    if(tab==="shaken"){ title="車検"; body=listShaken(); }
+    if(tab==="repair"){ title="修理依頼"; body=listRepairs(); }
+  } else {
+    const v = V.find(x=>x.id===screen.id);
+    back = screen.name==="detail" ? {name:"list"} : {name:"detail",id:v.id};
+    if(screen.name==="detail"){ title=v.kind; body=detail(v); }
+    if(screen.name==="reserve"){ title="予約"; body=reserveForm(v); }
+    if(screen.name==="return"){ title="返却"; body=returnForm(v); }
+    if(screen.name==="repair"){ title="修理を頼む"; body=repairForm(v); }
+    if(screen.name==="done"){ title=""; back=null; body=doneScreen(screen); }
+  }
+  h.innerHTML = `${back?`<button class="back" onclick='go(${JSON.stringify(back)})' aria-label="戻る">‹</button>`:""}<h1>${title}</h1><span class="today">${TODAY.getMonth()+1}/${TODAY.getDate()}（木）</span>${pill}`;
+  s.innerHTML = body; s.scrollTop=0;
+}
+
+function nameScreen(first){
+  return `<div class="welcome">${first?`<h2>あなたの名前を選んでください</h2><p class="sub" style="margin:0 0 14px">このスマホに覚えておきます。予約するとき自動で入ります</p>`:`<p class="sub" style="margin:0 0 14px">今は「${ME}」です。変えるなら選んでください</p>`}
+  <div class="opts">${PEOPLE.map(p=>`<button class="opt ${ME===p?"on":""}" onclick="saveMe('${p}')">${p}<span>›</span></button>`).join("")}</div>
+  <div class="field" style="margin-top:16px"><label>リストにない名前</label><div class="two" style="grid-template-columns:1fr auto"><input id="meIn" placeholder="名前を入力"><button class="btn primary" style="width:auto;padding:12px 18px;font-size:16px" onclick="saveMe(document.getElementById('meIn').value)">決定</button></div></div></div>`;
+}
+
+function listCars(){
+  const byType = V.filter(v=>tfilter==="all"||v.type===tfilter);
+  const n = k => byType.filter(v=>k==="all"||status(v)===k).length;
+  const nt = t => V.filter(v=>(t==="all"||v.type===t)&&(filter==="all"||status(v)===filter)).length;
+  const list = byType.filter(v=>filter==="all"||status(v)===filter);
+  return `<div class="chips">
+    ${[["all","全部"],["free","空き"],["use","使用中"]].map(([k,l])=>`<button class="chip ${filter===k?"on":""}" onclick="filter='${k}';render()">${l}<span class="n">${n(k)}</span></button>`).join("")}
+  </div><div class="chips types">
+    ${[["all","全種類"],["トラック","トラック"],["バン","バン"],["普通車","普通車"]].map(([k,l])=>`<button class="chip ${tfilter===k?"on":""}" onclick="tfilter='${k}';render()">${l}<span class="n">${nt(k)}</span></button>`).join("")}
+  </div>` + (list.length?"":`<div class="empty">この条件の車はありません</div>`) + list.map(v=>`
+  <button class="card" onclick="go({name:'detail',id:${v.id}})">
+    <div class="band ${status(v)}"><span>${LABEL[status(v)]}</span>${bandExtra(v)}</div>
+    <div class="body">
+      ${thumbHtml(v)}
+      <div class="meta"><div class="r1">${plateHtml(v,true)}${shakenTag(v)}</div><div class="kind">${v.kind}</div><div class="who">${useText(v)}</div></div>
+    </div>
+  </button>`).join("");
+}
+
+function detail(v){
+  const st=status(v);
+  const rows = [
+    ["状態", `<span class="status-pill ${st}">${LABEL[st]}</span>`],
+    v.use ? ["使っている人", v.use.who+"さん"] : null,
+    v.use ? ["現場", v.use.site] : null,
+    v.use ? ["いつまで", `${fmt(parse(v.use.to))} まで`] : null,
+    !v.use ? ["置いてある場所", v.lot] : null,
+    v.fix ? ["修理", `<span class="warn">${v.fix}</span>`] : null,
+    ["車検", `<span class="${shakenClass(v)?"warn":""}">${jp(v.shaken)}（${shakenText(v)}）</span>`],
+  ].filter(Boolean);
+  const actions = st==="use"
+    ? `<button class="btn primary" onclick="go({name:'return',id:${v.id}})">返却する</button>`
+    : (st==="free" ? `<button class="btn primary" onclick="go({name:'reserve',id:${v.id}})">この車を予約する</button>` : "");
+  return `<div class="hero">${thumbHtml(v)}${plateHtml(v)}<label class="photo-btn">📷 ${v.photo?"写真を変える":"写真を登録"}<input type="file" accept="image/*" capture="environment" hidden onchange="setPhoto(${v.id},this)"></label></div>
+  <div class="rows">${rows.map(([k,val])=>`<div class="row"><span class="k">${k}</span><span class="v">${val}</span></div>`).join("")}</div>
+  <div class="actions">${actions}<button class="btn ghost" onclick="go({name:'repair',id:${v.id}})">修理を頼む</button></div>
+  ${calendar(v)}`;
+}
+
+function calendar(v){
+  const y=TODAY.getFullYear(), m=TODAY.getMonth();
+  const first=new Date(y,m,1), last=new Date(y,m+1,0);
+  const busy = new Set();
+  const spans = [...(v.use?[v.use]:[]), ...RES.filter(r=>r.vid===v.id)];
+  spans.forEach(sp=>{ for(let d=parse(sp.from); d<=parse(sp.to); d.setDate(d.getDate()+1)) busy.add(ymd(d)); });
+  let cells = ["日","月","火","水","木","金","土"].map(d=>`<div class="d dow">${d}</div>`).join("");
+  for(let i=0;i<first.getDay();i++) cells+=`<div class="d blank"></div>`;
+  for(let d=1; d<=last.getDate(); d++){ const dt=new Date(y,m,d), k=ymd(dt);
+    cells+=`<div class="d ${busy.has(k)?"use":""} ${k===ymd(TODAY)?"today":""}">${d}</div>`; }
+  const next = spans.filter(sp=>parse(sp.from)>TODAY).sort((a,b)=>a.from>b.from?1:-1)[0];
+  return `<div class="cal"><h3>${m+1}月の予定</h3><div class="grid">${cells}</div>
+  <div class="legend"><i></i>予約・使用中${next?` ／ 次の予約：${fmt(parse(next.from))}〜 ${next.who}さん（${next.site}）`:""}</div></div>`;
+}
+
+function reserveForm(v){
+  form.from = form.from||ymd(TODAY); form.to = form.to||form.from; if(form.who===undefined) form.who=ME; form.site=form.site||"";
+  return `<div class="sheet-title">${v.kind}</div><p class="sub">${v.plate[0]} ${v.plate[1]}</p>
+  <div class="field"><label>いつからいつまで</label><div class="two">
+    <input type="date" value="${form.from}" oninput="form.from=this.value">
+    <input type="date" value="${form.to}" oninput="form.to=this.value"></div></div>
+  <div class="field"><label>使う人</label>${form.other
+    ? `<select onchange="form.who=this.value"><option value="">選んでください</option>${[...new Set([ME,...PEOPLE])].map(p=>`<option ${form.who===p?"selected":""}>${p}${p===ME?"（自分）":""}</option>`).join("")}</select><button class="chip" style="margin-top:8px" onclick="form.other=false;form.who=ME;render()">自分に戻す</button>`
+    : `<div class="mine"><span>${ME}さん（自分）</span><button class="sw" onclick="form.other=true;form.who='';render()">別の人にする</button></div>`}</div>
+  <div class="field"><label>行く現場</label><select onchange="form.site=this.value"><option value="">選んでください</option>${SITES.map(p=>`<option ${form.site===p?"selected":""}>${p}</option>`).join("")}</select></div>
+  <div class="actions"><button class="btn primary big" onclick="doReserve(${v.id})">予約する</button></div>`;
+}
+function doReserve(id){
+  const v=V.find(x=>x.id===id);
+  if(!form.who||!form.site){ alert("使う人と現場を選んでください"); return; }
+  const r={vid:id, who:form.who, site:form.site, from:form.from, to:form.to};
+  if(form.from<=ymd(TODAY) && form.to>=ymd(TODAY)) v.use=r; else RES.push(r);
+  const msg=`${fmt(parse(r.from))}〜${fmt(parse(r.to))}　${r.who}さん　${r.site}`;
+  Object.keys(form).forEach(k=>delete form[k]);
+  go({name:"done",id, title:"予約しました", msg});
+}
+
+function returnForm(v){
+  return `<div class="sheet-title">どこに止めましたか？</div><p class="sub">${v.kind}　${v.plate[1]}</p>
+  <div class="opts">${LOTS.map(l=>`<button class="opt" onclick="doReturn(${v.id},'${l}')">${l}<span>›</span></button>`).join("")}</div>`;
+}
+function doReturn(id,lot){ const v=V.find(x=>x.id===id); v.use=null; v.lot=lot; go({name:"done",id,title:"返却しました",msg:`${lot} に置いてある、と記録しました`}); }
+
+function repairForm(v){
+  form.sym = form.sym||new Set(); form.memo=form.memo||"";
+  const syms=["エンジン警告灯","異音がする","タイヤ","ブレーキ","エアコン","傷・へこみ","その他"];
+  return `<div class="sheet-title">${v.kind}</div><p class="sub">${v.plate[0]} ${v.plate[1]}</p>
+  <div class="field"><label>どこが悪い？（複数OK）</label><div class="sympt">${syms.map(s=>`<button class="chip ${form.sym.has(s)?"on":""}" onclick="toggleSym('${s}')">${s}</button>`).join("")}</div></div>
+  <div class="field"><label>くわしく（任意）</label><textarea rows="3" placeholder="例：右に曲がるときにゴトゴト鳴る" oninput="form.memo=this.value">${form.memo}</textarea></div>
+  <div class="field"><div class="photo-box">📷 写真をつける</div></div>
+  <div class="actions"><button class="btn primary big" onclick="doRepair(${v.id})">修理を頼む</button></div>`;
+}
+function toggleSym(s){ form.sym.has(s)?form.sym.delete(s):form.sym.add(s); render(); }
+function doRepair(id){
+  const v=V.find(x=>x.id===id);
+  if(!form.sym.size&&!form.memo){ alert("どこが悪いか選んでください"); return; }
+  const text=[...form.sym].join("・")+(form.memo?`：${form.memo}`:"");
+  REPAIRS.unshift({vid:id, when:ymd(TODAY), who:ME, text, done:false});
+  Object.keys(form).forEach(k=>delete form[k]);
+  go({name:"done",id,title:"修理を頼みました",msg:"事務所に届きました"});
+}
+
+function doneScreen(s){
+  return `<div class="done"><div class="ok">✓</div><h2>${s.title}</h2><p>${s.msg}</p>
+  <button class="btn primary" onclick="setTab('cars')">車両一覧へ戻る</button></div>`;
+}
+
+function listShaken(){
+  const sorted=[...V].sort((a,b)=>a.shaken>b.shaken?1:-1);
+  return `<p class="sub" style="margin-top:0">期限が近い順</p>`+sorted.map(v=>`
+  <div class="li" onclick="setTab('cars');go({name:'detail',id:${v.id}})">
+    ${plateHtml(v,true)}<div class="grow"><div class="t">${v.kind}</div><div class="s">${jp(v.shaken)}</div></div>
+    <span class="days ${shakenClass(v)}">${shakenText(v)}</span></div>`).join("");
+}
+function listRepairs(){
+  if(!REPAIRS.length) return `<div class="empty">修理依頼はありません</div>`;
+  return REPAIRS.map(r=>{ const v=V.find(x=>x.id===r.vid); return `
+  <div class="li"><div class="grow"><div class="t">${r.text}</div><div class="s">${v.kind}　${fmt(parse(r.when))}　${r.who}</div></div>
+    <span class="tag ${r.done?"done":""}">${r.done?"対応済み":"未対応"}</span></div>`; }).join("");
+}
+
+/* ---------- PC dashboard ---------- */
+function renderPc(){
+  const pc=document.getElementById("pc");
+  const n=k=>V.filter(v=>status(v)===k).length;
+  const soon=[...V].filter(v=>daysTo(v.shaken)<=60).sort((a,b)=>a.shaken>b.shaken?1:-1);
+  const open=REPAIRS.filter(r=>!r.done);
+  pc.innerHTML=`
+  <div class="top"><h1>社用車 今日の状況</h1><span class="today">${TODAY.getFullYear()}年${TODAY.getMonth()+1}月${TODAY.getDate()}日（木）</span>
+    <div class="counts"><div class="count free">${n("free")}<span>空き</span></div><div class="count use">${n("use")}<span>使用中</span></div><div class="count fix">${n("fix")}<span>修理中</span></div></div></div>
+  <div class="grid2">
+    <div class="stack">
+      <div class="panel"><h2>車検が近い車 <span class="tag">${soon.length}台</span></h2>
+        ${soon.length?soon.map(v=>`<div class="li">${plateHtml(v,true)}<div class="grow"><div class="t">${v.kind}</div><div class="s">${jp(v.shaken)}</div></div><span class="days ${shakenClass(v)}">${shakenText(v)}</span></div>`).join(""):`<div class="empty">60日以内の車検はありません</div>`}
+      </div>
+      <div class="panel"><h2>修理依頼 <span class="tag">${open.length}件 未対応</span></h2>
+        ${open.length?open.map((r,i)=>{const v=V.find(x=>x.id===r.vid);return `<div class="li"><div class="grow"><div class="t">${r.text}</div><div class="s">${v.kind}　${fmt(parse(r.when))}　${r.who}</div></div><button class="btn ghost small" onclick="markDone(${REPAIRS.indexOf(r)})">対応済みにする</button></div>`}).join(""):`<div class="empty">未対応の依頼はありません</div>`}
+      </div>
+      <div class="panel"><h2>この先の予約</h2>
+        ${RES.filter(r=>parse(r.from)>TODAY).sort((a,b)=>a.from>b.from?1:-1).map(r=>{const v=V.find(x=>x.id===r.vid);return `<div class="li"><div class="days" style="background:var(--bg);color:var(--ink)">${fmt(parse(r.from))}〜${fmt(parse(r.to))}</div><div class="grow"><div class="t">${v.kind}</div><div class="s">${r.who}さん　${r.site}</div></div></div>`}).join("")||`<div class="empty">予約はありません</div>`}
+      </div>
+    </div>
+    <div class="panel wide"><h2>全車両</h2>
+      <table class="table"><thead><tr><th>状態</th><th>写真</th><th>ナンバー</th><th>車種</th><th>使っている人</th><th>現場</th><th>置き場所</th><th>車検</th></tr></thead><tbody>
+      ${["use","free","fix"].map(g=>{const rows=V.filter(v=>status(v)===g); if(!rows.length) return ""; return `<tr class="grp ${g}"><td colspan="8">${LABEL[g]}<span>${rows.length}台</span></td></tr>`+rows.map(v=>{const st=status(v);return `<tr class="vrow ${st}">
+        <td class="st"><span class="dot ${st}"></span>${LABEL[st]}</td>
+        <td>${thumbHtml(v)}</td><td>${plateHtml(v,true)}</td><td class="kind">${v.kind}</td>
+        <td>${v.use?v.use.who:"—"}</td><td>${v.use?`${v.use.site}<div class="s" style="color:var(--mute);font-size:12px">${fmt(parse(v.use.from))}〜${fmt(parse(v.use.to))}</div>`:"—"}</td>
+        <td>${v.use?"—":v.lot}</td><td><span class="days ${shakenClass(v)}" style="font-size:13px">${shakenText(v)}</span></td></tr>`}).join("")}).join("")}
+      </tbody></table></div>
+  </div>`;
+}
+function markDone(i){ const r=REPAIRS[i]; r.done=true; const v=V.find(x=>x.id===r.vid); if(v.fix===r.text) delete v.fix; render(); }
+
+render();
+</script>
+</body>
+</html>

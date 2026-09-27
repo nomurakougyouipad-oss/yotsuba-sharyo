@@ -1,0 +1,88 @@
+rules_version = '2';
+
+// 社用車管理アプリ（yotsuba-sharyo）Firestore ルール
+// - アプリを開いた人（匿名ログイン済み）だけが読み書きできる
+// - 決まった形のデータしか保存できない
+// - 車・予約・修理は消せない（廃車は retired: true で残す）。サンプルデータ（sample: true）だけは消せる
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+    function str(v, max) {
+      return v is string && v.size() > 0 && v.size() <= max;
+    }
+    function isDate(v) {
+      return v is string && v.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
+    }
+    function optStr(d, k, max) {
+      return !(k in d) || d[k] == null || (d[k] is string && d[k].size() <= max);
+    }
+    function isSample() {
+      return resource.data.get('sample', false) == true;
+    }
+
+    // ---- 車両 ----
+    function validVehicle(d) {
+      return d.keys().hasAll(['plateArea', 'plateClass', 'plateKana', 'plateNum', 'kind', 'type', 'shakenDate', 'homeLot', 'retired'])
+        && str(d.plateArea, 10)
+        && str(d.plateClass, 3)
+        && str(d.plateKana, 2)
+        && str(d.plateNum, 10)
+        && str(d.kind, 60)
+        && d.type in ['トラック', 'バン', '普通車']
+        && isDate(d.shakenDate)
+        && str(d.homeLot, 30)
+        && optStr(d, 'currentLot', 30)
+        && optStr(d, 'photoUrl', 2000)
+        && (!('status' in d) || d.status in ['free', 'use', 'fix'])
+        && d.retired is bool;
+    }
+    match /vehicles/{vehicleId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && validVehicle(request.resource.data);
+      allow delete: if signedIn() && isSample();
+    }
+
+    // ---- 予約 ----
+    function validReservation(d) {
+      return d.keys().hasAll(['vehicleId', 'who', 'site', 'from', 'to'])
+        && str(d.vehicleId, 100)
+        && str(d.who, 40)
+        && str(d.site, 100)
+        && isDate(d.from) && isDate(d.to) && d.from <= d.to
+        && optStr(d, 'createdBy', 40)
+        && optStr(d, 'returnedLot', 30);
+    }
+    match /reservations/{reservationId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && validReservation(request.resource.data);
+      allow delete: if signedIn() && isSample();
+    }
+
+    // ---- 修理依頼 ----
+    function validRepair(d) {
+      return d.keys().hasAll(['vehicleId', 'status'])
+        && str(d.vehicleId, 100)
+        && d.status in ['open', 'in_repair', 'done']
+        && (!('symptoms' in d) || (d.symptoms is list && d.symptoms.size() <= 20))
+        && optStr(d, 'memo', 2000)
+        && (!('photoUrls' in d) || (d.photoUrls is list && d.photoUrls.size() <= 20))
+        && optStr(d, 'reportedBy', 40);
+    }
+    match /repairs/{repairId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && validRepair(request.resource.data);
+      allow delete: if signedIn() && isSample();
+    }
+
+    // ---- 設定（名前・現場・駐車場のリストなど） ----
+    match /settings/{docId} {
+      allow read: if signedIn();
+      allow write: if signedIn() && docId == 'app';
+    }
+
+    // それ以外はすべて禁止
+  }
+}
