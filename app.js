@@ -110,6 +110,11 @@ function plateHtml(v, small) {
   return `<span class="plate"${small ? ' style="font-size:15px"' : ""}><small>${esc(v.plateArea)} ${esc(v.plateClass)}</small>${esc(v.plateKana)} ${esc(v.plateNum)}</span>`;
 }
 function shakenClass(v) { const d = daysTo(v.shakenDate); return d < 0 ? "over" : (d <= alertDays() ? "soon" : ""); }
+function shakenTag(v) {
+  const d = daysTo(v.shakenDate); if (d > alertDays()) return "";
+  return `<span class="shk ${d < 0 ? "over" : ""}"><span>🔔 車検</span><b>${d < 0 ? `${-d}日超過` : (d === 0 ? "今日" : `あと${d}日`)}</b></span>`;
+}
+const byShaken = list => [...list].sort((a, b) => (a.shakenDate > b.shakenDate ? 1 : -1));
 function shakenText(v) { const d = daysTo(v.shakenDate); return d < 0 ? `${-d}日 超過` : (d === 0 ? "今日" : `あと ${d}日`); }
 function bandExtra(v, st, use) {
   if (use) return `<span class="period">${fmt(use.from)}〜${fmt(use.to)}</span>`;
@@ -164,7 +169,7 @@ function renderPhone() {
   if (sc.name === "list") {
     pill = `<button class="me-pill" data-act="meEdit">${esc(ME)}</button>`;
     if (ui.tab === "cars") body = listCars();
-    else if (ui.tab === "shaken") { title = "車検"; body = `<div class="empty">車検の一覧は、次の段階で使えるようになります</div>`; }
+    else if (ui.tab === "shaken") { title = "車検"; body = listShaken(); }
     else { title = "修理依頼"; body = listRepairs(); }
   } else if (sc.name === "done") {
     title = ""; body = doneScreen(sc);
@@ -191,6 +196,16 @@ function nameScreen(first) {
   <div class="field" style="margin-top:16px"><label for="meIn">リストにない名前</label><form id="meform" class="two" style="grid-template-columns:1fr auto"><input id="meIn" name="me" placeholder="名前を入力" maxlength="40" autocomplete="off"><button type="submit" class="btn primary" style="width:auto;padding:12px 18px;font-size:16px">決定</button></form></div></div>`;
 }
 
+function listShaken() {
+  if (!S.ready) return `<div class="loading">読み込み中…</div>`;
+  const vs = byShaken(active());
+  if (!vs.length) return `<div class="empty">まだ車が登録されていません</div>`;
+  return `<p class="sub" style="margin-top:0">期限が近い順</p>` + vs.map(v => `
+  <div class="li tap" data-act="detail" data-id="${v.id}" role="button" tabindex="0">
+    ${plateHtml(v, true)}<div class="grow"><div class="t">${esc(v.kind)}</div><div class="s">${jp(v.shakenDate)}</div></div>
+    <span class="days ${shakenClass(v)}">${shakenText(v)}</span></div>`).join("");
+}
+
 function listCars() {
   if (!S.ready) return `<div class="loading">読み込み中…</div>`;
   const all = active();
@@ -210,7 +225,7 @@ function listCars() {
     <div class="band ${st}"><span>${LABEL[st]}</span>${bandExtra(v, st, use)}</div>
     <div class="body">
       ${thumbHtml(v)}
-      <div class="meta"><div class="r1">${plateHtml(v, true)}</div><div class="kind">${esc(v.kind)}</div><div class="who">${useText(v, use, fix)}</div></div>
+      <div class="meta"><div class="r1">${plateHtml(v, true)}${shakenTag(v)}</div><div class="kind">${esc(v.kind)}</div><div class="who">${useText(v, use, fix)}</div></div>
     </div>
   </button>`;
   }).join("");
@@ -462,11 +477,14 @@ function renderPc() {
 
   $("pc").innerHTML = `
   <div class="top"><h1>社用車 今日の状況</h1><span class="today">${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日（${DOW[d.getDay()]}）</span>
-    <div class="counts"><div class="count free">${n("free")}<span>空き</span></div><div class="count use">${n("use")}<span>使用中</span></div><div class="count fix">${n("fix")}<span>修理中</span></div></div></div>
+    <div class="counts"><div class="count free">${n("free")}<span>空き</span></div><div class="count use">${n("use")}<span>使用中</span></div><div class="count fix">${n("fix")}<span>修理中</span></div></div>
+    <button class="btn ghost small" data-act="settings">⚙ 設定</button></div>
   ${errBar()}
   <div class="grid2">
     <div class="stack">
+      ${shakenPanel()}
       ${repairPanel()}
+      ${futurePanel()}
     </div>
     <div class="panel wide"><h2>全車両 <button class="btn primary small" data-act="add">＋ 車両を追加</button></h2>${table}</div>
     ${retired.length ? `<details class="panel retired"${ui.retiredOpen ? " open" : ""}><summary>廃車済み（${retired.length}台）</summary>
@@ -558,6 +576,25 @@ async function uploadRepairPhotos(repairId, files, onProgress) {
   return out;
 }
 
+// PC: 車検が近い車（60日以内。通知日数を60日より長くしたときはその日数まで）
+function shakenPanel() {
+  const lim = Math.max(60, alertDays());
+  const soon = byShaken(active().filter(v => daysTo(v.shakenDate) <= lim));
+  return `<div class="panel"><h2>車検が近い車 <span class="tag">${soon.length}台</span></h2>
+    ${soon.length ? soon.map(v => `<div class="li tap" data-act="edit" data-id="${v.id}" title="押すと車検満了日を変えられます">${plateHtml(v, true)}<div class="grow"><div class="t">${esc(v.kind)}</div><div class="s">${jp(v.shakenDate)}</div></div><span class="days ${shakenClass(v)}">${shakenText(v)}</span></div>`).join("")
+      : `<div class="empty">${lim}日以内の車検はありません</div>`}
+  </div>`;
+}
+// PC: この先の予約（今日より後、日付順）
+function futurePanel() {
+  const t = ymd(today());
+  const list = S.reservations.filter(r => !r.returnedAt && r.from > t && byId(r.vehicleId) && !byId(r.vehicleId).retired)
+    .sort((a, b) => (a.from > b.from ? 1 : a.from < b.from ? -1 : 0));
+  return `<div class="panel"><h2>この先の予約</h2>
+    ${list.map(r => { const v = byId(r.vehicleId); return `<div class="li"><div class="days" style="background:var(--bg);color:var(--ink)">${fmt(r.from)}〜${fmt(r.to)}</div><div class="grow"><div class="t">${esc(v.kind)}</div><div class="s">${esc(r.who)}さん　${esc(r.site)}</div></div></div>`; }).join("") || `<div class="empty">予約はありません</div>`}
+  </div>`;
+}
+
 // PC: 修理依頼パネル（未対応と修理中。対応済みは出さない）
 function repairPanel() {
   const list = sortedRepairs(S.repairs.filter(r => r.status !== "done"))
@@ -625,6 +662,69 @@ function closeModal() {
   $("modal").hidden = true; $("modal").innerHTML = ""; modalId = null;
   if (pendingPhoto) URL.revokeObjectURL(pendingPhoto.preview);
   pendingPhoto = null;
+}
+
+/* ---------- 設定（PCのみ） ---------- */
+const LOT_COUNT = 3;
+function openSettings() {
+  const st = S.settings;
+  const lines = a => esc((a || []).join("\n"));
+  const lots = [...(st.lots || [])]; while (lots.length < LOT_COUNT) lots.push("");
+  modalId = null;
+  $("modal").innerHTML = `<div class="overlay"><form class="modal panel" id="sform" novalidate>
+    <h2>設定<button type="button" class="x" data-act="close" aria-label="閉じる">×</button></h2>
+    <div class="mbody">
+      <p class="ferr" id="ferr" hidden></p>
+      <div class="field"><label for="s-people">名前リスト（現場担当者）</label>
+        <textarea id="s-people" name="people" rows="6">${lines(st.people)}</textarea>
+        <div class="hint">1行に1人。スマホの「あなたの名前」と、予約の「別の人にする」に出ます</div></div>
+      <div class="field"><label for="s-sites">現場リスト</label>
+        <textarea id="s-sites" name="sites" rows="6">${lines(st.sites)}</textarea>
+        <div class="hint">1行に1つ。予約の「行く現場」に出ます（リストにない現場は「その他」で入力できます）</div></div>
+      <div class="field"><label>駐車場（${LOT_COUNT}ヶ所）</label>
+        <div class="lots-in">${lots.slice(0, LOT_COUNT).map((l, i) => `<input name="lot${i}" value="${esc(l)}" aria-label="駐車場${i + 1}" maxlength="30" autocomplete="off">`).join("")}</div>
+        <div class="hint">返却のときのボタンに出ます。名前を変えると、その駐車場にある車の置き場所も新しい名前になります</div></div>
+      <div class="field"><label for="s-days">車検の通知（何日前から）</label>
+        <div class="days-in"><input id="s-days" name="shakenAlertDays" type="number" inputmode="numeric" min="1" max="365" value="${esc(st.shakenAlertDays || 30)}"><span>日前から</span></div>
+        <div class="hint">スマホの車両カードに「🔔 車検」が出始める日数です（はじめは30日）</div></div>
+    </div>
+    <div class="mfoot"><span class="sp"></span>
+      <button type="button" class="btn ghost" data-act="close">やめる</button>
+      <button type="submit" class="btn primary">保存する</button>
+    </div>
+  </form></div>`;
+  $("modal").hidden = false;
+  $("s-people").focus();
+}
+
+function saveSettings(form) {
+  const f = new FormData(form);
+  const list = k => [...new Set(String(f.get(k) || "").split(/\r?\n/).map(x => x.trim()).filter(Boolean))];
+  const people = list("people").map(x => x.slice(0, 40)), sites = list("sites").map(x => x.slice(0, 100));
+  const lots = Array.from({ length: LOT_COUNT }, (_, i) => String(f.get(`lot${i}`) || "").trim());
+  const days = Number(toHalf(String(f.get("shakenAlertDays") || "")));
+  let err = "";
+  if (lots.some(l => !l)) err = `駐車場を${LOT_COUNT}つとも入れてください`;
+  else if (new Set(lots).size < lots.length) err = "同じ名前の駐車場があります";
+  else if (!Number.isInteger(days) || days < 1 || days > 365) err = "車検の通知は 1〜365 の数字で入れてください";
+  if (err) { const e = $("ferr"); e.textContent = err; e.hidden = false; return; }
+
+  const b = writeBatch(db);
+  b.set(doc(db, "settings", "app"), { people, sites, lots, shakenAlertDays: days, updatedAt: serverTimestamp() }, { merge: true });
+  // 駐車場の名前を変えたら、その名前の車の「置き場所」も書きかえる
+  const old = S.settings.lots || [];
+  const renames = new Map(old.map((o, i) => [o, lots[i]]).filter(([o, n]) => o && n && o !== n && !lots.includes(o)));
+  if (renames.size) {
+    S.vehicles.forEach(v => {
+      const up = {};
+      if (renames.has(v.homeLot)) up.homeLot = renames.get(v.homeLot);
+      if (renames.has(v.currentLot)) up.currentLot = renames.get(v.currentLot);
+      if (Object.keys(up).length) b.update(doc(db, "vehicles", v.id), { ...up, updatedAt: serverTimestamp() });
+    });
+  }
+  b.commit().catch(e => { console.error(e); toast("設定を保存できませんでした。もう一度お試しください"); });
+  closeModal();
+  toast("設定を保存しました");
 }
 
 // 全角の数字・ハイフンを半角に（入力ゆれ対策）
@@ -786,6 +886,7 @@ document.addEventListener("click", e => {
     case "add": openModal(null); break;
     case "edit": openModal(id); break;
     case "close": closeModal(); break;
+    case "settings": openSettings(); break;
     case "retire": retireVehicle(modalId); break;
     case "restore": restoreVehicle(id); break;
     case "seed": seed(); break;
@@ -806,6 +907,7 @@ document.addEventListener("change", e => {
 });
 document.addEventListener("submit", e => {
   if (e.target.id === "vform") { e.preventDefault(); saveVehicle(e.target); }
+  if (e.target.id === "sform") { e.preventDefault(); saveSettings(e.target); }
   if (e.target.id === "meform") { e.preventDefault(); saveMe(e.target.me.value); }
 });
 // 予約フォームの入力を覚えておく
@@ -824,6 +926,9 @@ $("ph-screen").addEventListener("change", e => {
     render();
   }
   if (n === "site") { form.site = e.target.value; render(); } // 「その他」なら入力欄を出す
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Enter" && e.target.matches && e.target.matches(".li.tap")) e.target.click();
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("modal").hidden) closeModal(); });
 document.addEventListener("toggle", e => { if (e.target.matches && e.target.matches("details.retired")) ui.retiredOpen = e.target.open; }, true);
@@ -862,6 +967,8 @@ function startSync() {
 }
 
 applyView();
+// ホーム画面に追加して使えるように（PWA）
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(e => console.warn(e));
 onAuthStateChanged(auth, user => { if (user) startSync(); });
 signInAnonymously(auth).catch(e => {
   console.error(e);

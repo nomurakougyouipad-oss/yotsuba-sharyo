@@ -258,3 +258,12 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:3px solid v
 .pc .li .t .tag{vertical-align:1px}
 .pc .rpanel .li{align-items:flex-start}
 .pc .rpanel .li .t{white-space:normal;overflow:visible}
+
+/* ---- 段階5: 車検一覧・設定 ---- */
+.li.tap{cursor:pointer}
+.pc .top .btn.small{align-self:center}
+.lots-in{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.days-in{display:flex;align-items:center;gap:10px}
+.days-in input{width:120px}
+.days-in span{font-weight:700}
+.modal textarea{resize:vertical;line-height:1.6}

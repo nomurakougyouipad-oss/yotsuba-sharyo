@@ -83,9 +83,15 @@ service cloud.firestore {
     }
 
     // ---- 設定（名前・現場・駐車場のリストなど） ----
+    function validSettings(d) {
+      return (!('people' in d) || (d.people is list && d.people.size() <= 200))
+        && (!('sites' in d) || (d.sites is list && d.sites.size() <= 300))
+        && (!('lots' in d) || (d.lots is list && d.lots.size() >= 1 && d.lots.size() <= 10))
+        && (!('shakenAlertDays' in d) || (d.shakenAlertDays is int && d.shakenAlertDays >= 1 && d.shakenAlertDays <= 365));
+    }
     match /settings/{docId} {
       allow read: if signedIn();
-      allow write: if signedIn() && docId == 'app';
+      allow create, update: if signedIn() && docId == 'app' && validSettings(request.resource.data);
     }
 
     // それ以外はすべて禁止

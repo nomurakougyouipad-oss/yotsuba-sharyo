@@ -1,0 +1,17 @@
+{
+  "name": "社用車管理",
+  "short_name": "社用車",
+  "description": "よつば建設工業 社用車の空き・予約・修理・車検の管理",
+  "lang": "ja",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#EEF0EC",
+  "theme_color": "#2C4966",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
