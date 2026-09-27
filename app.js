@@ -22,7 +22,7 @@ const {
   initializeApp, getAuth, signInAnonymously, onAuthStateChanged,
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
   collection, doc, query, where, onSnapshot, getDocs, addDoc, updateDoc, writeBatch,
-  serverTimestamp, Timestamp,
+  serverTimestamp, Timestamp, runTransaction, getDocsFromServer, increment,
 } = fb;
 
 const fbApp = initializeApp(firebaseConfig);
@@ -50,7 +50,9 @@ const S = {
 
 /* ---------- 画面の状態 ---------- */
 const wide = matchMedia("(min-width: 900px)");
-const ui = { view: "phone", tab: "cars", screen: { name: "list" }, filter: "all", tfilter: "all", retiredOpen: false };
+const ui = { view: "phone", tab: "cars", screen: { name: "list" }, filter: "all", tfilter: "all", retiredOpen: false, backTo: null };
+const form = {}; // 予約フォームの入力中の内容（画面を描き直しても消えないように）
+const resetForm = () => { for (const k of Object.keys(form)) delete form[k]; };
 
 /* ---------- helpers ---------- */
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -66,6 +68,14 @@ const daysTo = s => Math.round((parse(s) - today()) / 86400000);
 const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* 保存できなくても動く */ } };
 const millis = t => (t && t.toMillis ? t.toMillis() : Number.MAX_SAFE_INTEGER);
+
+/* ---------- 自分の名前（このスマホに覚えておく） ---------- */
+let ME = lsGet("sharyo_me") || "";
+function saveMe(n) {
+  n = String(n || "").trim().slice(0, 40); if (!n) return;
+  ME = n; lsSet("sharyo_me", n); resetForm();
+  go({ name: "list" });
+}
 
 /* ---------- 車の状態（README「状態の決め方」） ---------- */
 const active = () => S.vehicles.filter(v => !v.retired);
@@ -117,32 +127,60 @@ function applyView() {
   if (ui.view !== "pc") closeModal();
   render();
 }
-function go(s) { ui.screen = s; render(); $("ph-screen").scrollTop = 0; }
+function go(s) { ui.screen = s; form.err = ""; render(); $("ph-screen").scrollTop = 0; }
 function setTab(t) { ui.tab = t; go({ name: "list" }); }
 
 function render() { if (ui.view === "phone") renderPhone(); else renderPc(); }
+// データが届いたときの描き直し。スマホで入力中なら、キーボードが閉じないよう後回しにする
+function refresh() {
+  const a = document.activeElement;
+  if (ui.view === "phone" && a && $("ph-screen").contains(a) && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) return;
+  render();
+}
 
 /* ================= スマホ版 ================= */
 function renderPhone() {
   const h = $("ph-header"), s = $("ph-screen"), t = $("ph-tabs");
+  // 初回は名前を選んでもらう
+  if (!ME) { h.innerHTML = `<h1>はじめに</h1>`; s.innerHTML = errBar() + nameScreen(true); t.hidden = true; return; }
+  t.hidden = false;
   t.innerHTML = [["cars", "🚐", "車両"], ["shaken", "📋", "車検"], ["repair", "🔧", "修理"]].map(([k, ic, l]) =>
     `<button class="${ui.tab === k ? "on" : ""}" data-act="tab" data-val="${k}"><span class="ic">${ic}</span>${l}</button>`).join("");
-
-  let title = "社用車", back = false, body = "";
-  const d = today();
-  if (ui.screen.name === "detail") {
-    const v = byId(ui.screen.id);
-    if (!v || v.retired) { ui.screen = { name: "list" }; return renderPhone(); }
-    title = esc(v.kind); back = true; body = detail(v);
-  } else if (ui.tab === "cars") {
-    body = listCars();
-  } else if (ui.tab === "shaken") {
-    title = "車検"; body = `<div class="empty">車検の一覧は、次の段階で使えるようになります</div>`;
-  } else {
-    title = "修理依頼"; body = `<div class="empty">修理依頼の一覧は、次の段階で使えるようになります</div>`;
+  if (ui.screen.name === "me") {
+    ui.backTo = { name: "list" };
+    h.innerHTML = `<button class="back" data-act="back" aria-label="戻る">‹</button><h1>あなたの名前</h1>`;
+    s.innerHTML = nameScreen(false); return;
   }
-  h.innerHTML = `${back ? `<button class="back" data-act="back" aria-label="戻る">‹</button>` : ""}<h1>${title}</h1><span class="today">${d.getMonth() + 1}/${d.getDate()}（${DOW[d.getDay()]}）</span>`;
+
+  let title = "社用車", back = null, body = "", pill = "";
+  const d = today(), sc = ui.screen;
+  if (sc.name === "list") {
+    pill = `<button class="me-pill" data-act="meEdit">${esc(ME)}</button>`;
+    if (ui.tab === "cars") body = listCars();
+    else if (ui.tab === "shaken") { title = "車検"; body = `<div class="empty">車検の一覧は、次の段階で使えるようになります</div>`; }
+    else { title = "修理依頼"; body = `<div class="empty">修理依頼の一覧は、次の段階で使えるようになります</div>`; }
+  } else if (sc.name === "done") {
+    title = ""; body = doneScreen(sc);
+  } else {
+    const v = byId(sc.id);
+    if (!v || v.retired) { ui.screen = { name: "list" }; return renderPhone(); }
+    back = sc.name === "detail" ? { name: "list" } : { name: "detail", id: v.id };
+    if (sc.name === "detail") { title = esc(v.kind); body = detail(v); }
+    if (sc.name === "reserve") { title = "予約"; body = reserveForm(v); }
+    if (sc.name === "return") { title = "返却"; body = returnForm(v); }
+  }
+  ui.backTo = back;
+  h.innerHTML = `${back ? `<button class="back" data-act="back" aria-label="戻る">‹</button>` : ""}<h1>${title}</h1><span class="today">${d.getMonth() + 1}/${d.getDate()}（${DOW[d.getDay()]}）</span>${pill}`;
   s.innerHTML = errBar() + body;
+}
+
+function nameScreen(first) {
+  const people = S.settings.people || [];
+  return `<div class="welcome">${first
+    ? `<h2>あなたの名前を選んでください</h2><p class="sub" style="margin:0 0 14px">このスマホに覚えておきます。予約するとき自動で入ります</p>`
+    : `<p class="sub" style="margin:0 0 14px">今は「${esc(ME)}」です。変えるなら選んでください</p>`}
+  <div class="opts">${people.map(p => `<button class="opt ${ME === p ? "on" : ""}" data-act="me" data-val="${esc(p)}">${esc(p)}<span>›</span></button>`).join("")}</div>
+  <div class="field" style="margin-top:16px"><label for="meIn">リストにない名前</label><form id="meform" class="two" style="grid-template-columns:1fr auto"><input id="meIn" name="me" placeholder="名前を入力" maxlength="40" autocomplete="off"><button type="submit" class="btn primary" style="width:auto;padding:12px 18px;font-size:16px">決定</button></form></div></div>`;
 }
 
 function listCars() {
@@ -182,11 +220,118 @@ function detail(v) {
     ["車検", `<span class="${shakenClass(v) ? "warn" : ""}">${jp(v.shakenDate)}（${shakenText(v)}）</span>`],
   ].filter(Boolean);
   const actions = st === "use"
-    ? `<button class="btn primary" data-act="soon">返却する</button>`
-    : (st === "free" ? `<button class="btn primary" data-act="soon">この車を予約する</button>` : "");
+    ? `<button class="btn primary" data-act="goto" data-val="return" data-id="${v.id}">返却する</button>`
+    : (st === "free" ? `<button class="btn primary" data-act="goto" data-val="reserve" data-id="${v.id}">この車を予約する</button>` : "");
   return `<div class="hero">${thumbHtml(v)}${plateHtml(v)}<button class="photo-btn" data-act="soon">📷 ${v.photoUrl ? "写真を変える" : "写真を登録"}</button></div>
   <div class="rows">${rows.map(([k, val]) => `<div class="row"><span class="k">${k}</span><span class="v">${val}</span></div>`).join("")}</div>
-  <div class="actions">${actions}<button class="btn ghost" data-act="soon">修理を頼む</button></div>`;
+  <div class="actions">${actions}<button class="btn ghost" data-act="soon">修理を頼む</button></div>
+  ${calendar(v)}`;
+}
+
+// 今月のカレンダー（予約・使用中の日をオレンジ、今日を枠線）
+function calendar(v) {
+  const td = today(), y = td.getFullYear(), m = td.getMonth();
+  const first = new Date(y, m, 1), last = new Date(y, m + 1, 0);
+  const lo = ymd(first), hi = ymd(last), busy = new Set();
+  S.reservations.filter(r => r.vehicleId === v.id && !r.returnedAt && r.to >= lo && r.from <= hi).forEach(r => {
+    for (let d = parse(r.from > lo ? r.from : lo); ymd(d) <= r.to && ymd(d) <= hi; d.setDate(d.getDate() + 1)) busy.add(ymd(d));
+  });
+  let cells = [..."日月火水木金土"].map(d => `<div class="d dow">${d}</div>`).join("");
+  for (let i = 0; i < first.getDay(); i++) cells += `<div class="d blank"></div>`;
+  for (let d = 1; d <= last.getDate(); d++) {
+    const k = ymd(new Date(y, m, d));
+    cells += `<div class="d ${busy.has(k) ? "use" : ""} ${k === ymd(td) ? "today" : ""}">${d}</div>`;
+  }
+  const next = nextRes(v);
+  return `<div class="cal"><h3>${m + 1}月の予定</h3><div class="grid">${cells}</div>
+  <div class="legend"><i></i>予約・使用中${next ? ` ／ 次の予約：${fmt(next.from)}〜 ${esc(next.who)}さん（${esc(next.site)}）` : ""}</div></div>`;
+}
+
+/* ---------- 予約 ---------- */
+const SITE_OTHER = "__other";
+const plateText = v => `${esc(v.plateArea)} ${esc(v.plateClass)} ${esc(v.plateKana)} ${esc(v.plateNum)}`;
+// 同じ車で日付が重なる予約（返却済みは除く）
+const findClash = (list, vid, from, to) => list.find(r => r.vehicleId === vid && !r.returnedAt && r.from <= to && from <= r.to) || null;
+const clashMsg = r => `その日は予約が入っています：${fmt(r.from)}〜${fmt(r.to)} ${r.who}さん（${r.site}）`;
+class ClashError extends Error {}
+
+function reserveForm(v) {
+  const t = ymd(today());
+  if (form.vid !== v.id) { resetForm(); form.vid = v.id; }
+  form.from = form.from || t; form.to = form.to || form.from; form.site = form.site || "";
+  const people = [...new Set([ME, ...(S.settings.people || [])])];
+  const sites = S.settings.sites || [];
+  return `<div class="sheet-title">${esc(v.kind)}</div><p class="sub">${plateText(v)}</p>
+  <div class="field"><label>いつからいつまで</label><div class="two">
+    <input type="date" name="from" value="${form.from}" aria-label="いつから">
+    <input type="date" name="to" value="${form.to}" min="${form.from}" aria-label="いつまで"></div></div>
+  <div class="field"><label>使う人</label>${form.other
+    ? `<select name="who" aria-label="使う人"><option value="">選んでください</option>${people.map(p => `<option value="${esc(p)}"${form.who === p ? " selected" : ""}>${esc(p)}${p === ME ? "（自分）" : ""}</option>`).join("")}</select><button class="chip" style="margin-top:8px" data-act="whoMe">自分に戻す</button>`
+    : `<div class="mine"><span>${esc(ME)}さん（自分）</span><button class="sw" data-act="whoOther">別の人にする</button></div>`}</div>
+  <div class="field"><label for="f-site">行く現場</label><select id="f-site" name="site"><option value="">選んでください</option>${sites.map(p => `<option value="${esc(p)}"${form.site === p ? " selected" : ""}>${esc(p)}</option>`).join("")}<option value="${SITE_OTHER}"${form.site === SITE_OTHER ? " selected" : ""}>その他（入力する）</option></select>
+    ${form.site === SITE_OTHER ? `<input name="siteOther" style="margin-top:8px" placeholder="現場の名前を入力" maxlength="100" value="${esc(form.siteOther || "")}" aria-label="現場の名前">` : ""}</div>
+  ${form.err ? `<p class="ferr">${esc(form.err)}</p>` : ""}
+  <div class="actions"><button class="btn primary big" data-act="reserve" data-id="${v.id}"${form.busy ? " disabled" : ""}>${form.busy ? "予約しています…" : "予約する"}</button></div>`;
+}
+
+async function doReserve(v) {
+  if (form.busy) return;
+  const t = ymd(today());
+  const who = form.other ? (form.who || "") : ME;
+  const site = form.site === SITE_OTHER ? String(form.siteOther || "").trim() : form.site;
+  const { from, to } = form;
+  let err = "";
+  if (!from || !to) err = "いつからいつまでを入れてください";
+  else if (to < from) err = "「いつまで」は「いつから」と同じか後の日にしてください";
+  else if (to < t) err = "過ぎた日は予約できません";
+  else if (!who || !site) err = "使う人と現場を選んでください";
+  else { const c = findClash(S.reservations, v.id, from, to); if (c) err = clashMsg(c); }
+  if (err) { form.err = err; render(); return; }
+
+  form.err = ""; form.busy = true; render();
+  const r = { vehicleId: v.id, who, site, from, to, createdBy: ME, returnedAt: null, returnedLot: null };
+  try {
+    // 2台のスマホで同時に予約しても重ならないよう、サーバーの最新の予約で確かめてから登録する
+    await runTransaction(db, async tx => {
+      const vref = doc(db, "vehicles", v.id);
+      const vs = await tx.get(vref);
+      if (!vs.exists() || vs.data().retired) throw new ClashError("この車は予約できません");
+      const snap = await getDocsFromServer(query(collection(db, "reservations"), where("vehicleId", "==", v.id), where("returnedAt", "==", null)));
+      const c = findClash(snap.docs.map(d => d.data()), v.id, from, to);
+      if (c) throw new ClashError(clashMsg(c));
+      tx.update(vref, { resSeq: increment(1), updatedAt: serverTimestamp() });
+      tx.set(doc(collection(db, "reservations")), { ...r, createdAt: serverTimestamp() });
+    });
+  } catch (e) {
+    console.error(e);
+    form.busy = false;
+    form.err = e instanceof ClashError ? e.message : "予約できませんでした。電波のよい所でもう一度押してください";
+    if (ui.screen.name === "reserve") render();
+    return;
+  }
+  resetForm();
+  go({ name: "done", title: "予約しました", msg: `${fmt(from)}〜${fmt(to)}　${who}さん　${site}` });
+}
+
+/* ---------- 返却 ---------- */
+function returnForm(v) {
+  return `<div class="sheet-title">どこに止めましたか？</div><p class="sub">${esc(v.kind)}　${esc(v.plateKana)} ${esc(v.plateNum)}</p>
+  <div class="opts">${(S.settings.lots || []).map(l => `<button class="opt" data-act="return" data-id="${v.id}" data-val="${esc(l)}">${esc(l)}<span>›</span></button>`).join("")}</div>`;
+}
+function doReturn(v, lot) {
+  const use = currentUse(v);
+  if (!use) { toast("この車はもう返却されています"); go({ name: "detail", id: v.id }); return; }
+  // 押した瞬間に返却完了（電波が悪くても、つながったときに送られる）
+  const b = writeBatch(db);
+  b.update(doc(db, "reservations", use.id), { returnedAt: serverTimestamp(), returnedLot: lot });
+  b.update(doc(db, "vehicles", v.id), { currentLot: lot, updatedAt: serverTimestamp() });
+  b.commit().catch(e => { console.error(e); toast("返却を記録できませんでした。もう一度お試しください"); });
+  go({ name: "done", title: "返却しました", msg: `${lot} に置いてある、と記録しました` });
+}
+
+function doneScreen(sc) {
+  return `<div class="done"><div class="ok">✓</div><h2>${esc(sc.title)}</h2><p>${esc(sc.msg)}</p>
+  <button class="btn primary" data-act="tab" data-val="cars">車両一覧へ戻る</button></div>`;
 }
 
 /* ================= PC版ダッシュボード ================= */
@@ -365,13 +510,23 @@ async function seed() {
 }
 
 async function unseed() {
-  if (!confirm("サンプルデータ（車・予約・修理の例）をすべて消します。\n自分で登録した車は消えません。\n\n消しますか？")) return;
+  if (!confirm("サンプルデータ（サンプルの車と、その車で試しに入れた予約・修理）をすべて消します。\n自分で登録した車は消えません。\n\n消しますか？")) return;
   try {
-    const b = writeBatch(db);
-    for (const c of ["vehicles", "reservations", "repairs"]) {
-      (await getDocs(query(collection(db, c), where("sample", "==", true)))).forEach(d => b.delete(d.ref));
+    const refs = new Map(); // 同じ記録を2回消さないよう、場所で重複をまとめる
+    const add = snap => snap.forEach(d => refs.set(d.ref.path, d.ref));
+    const cars = await getDocs(query(collection(db, "vehicles"), where("sample", "==", true)));
+    const ids = cars.docs.map(d => d.id);
+    for (const c of ["reservations", "repairs"]) {
+      add(await getDocs(query(collection(db, c), where("sample", "==", true))));
+      for (let i = 0; i < ids.length; i += 30) add(await getDocs(query(collection(db, c), where("vehicleId", "in", ids.slice(i, i + 30)))));
     }
-    await b.commit();
+    add(cars); // 車は最後に消す（ルールが「サンプルの車の予約か」を確かめるため）
+    const all = [...refs.values()];
+    for (let i = 0; i < all.length; i += 400) {
+      const b = writeBatch(db);
+      all.slice(i, i + 400).forEach(r => b.delete(r));
+      await b.commit();
+    }
     toast("サンプルデータを消しました");
   } catch (e) { console.error(e); toast("消せませんでした"); }
 }
@@ -393,7 +548,14 @@ document.addEventListener("click", e => {
     case "filter": ui.filter = val; render(); break;
     case "tfilter": ui.tfilter = val; render(); break;
     case "detail": go({ name: "detail", id }); break;
-    case "back": go({ name: "list" }); break;
+    case "back": go(ui.backTo || { name: "list" }); break;
+    case "goto": go({ name: val, id }); break;
+    case "me": saveMe(val); break;
+    case "meEdit": go({ name: "me" }); break;
+    case "whoOther": form.other = true; form.who = ""; render(); break;
+    case "whoMe": form.other = false; form.who = ""; render(); break;
+    case "reserve": { const v = byId(id); if (v) doReserve(v); break; }
+    case "return": { const v = byId(id); if (v) doReturn(v, val); break; }
     case "soon": toast("この機能は次の段階で使えるようになります"); break;
     case "add": openModal(null); break;
     case "edit": openModal(id); break;
@@ -404,7 +566,26 @@ document.addEventListener("click", e => {
     case "unseed": unseed(); break;
   }
 });
-document.addEventListener("submit", e => { if (e.target.id === "vform") { e.preventDefault(); saveVehicle(e.target); } });
+document.addEventListener("submit", e => {
+  if (e.target.id === "vform") { e.preventDefault(); saveVehicle(e.target); }
+  if (e.target.id === "meform") { e.preventDefault(); saveMe(e.target.me.value); }
+});
+// 予約フォームの入力を覚えておく
+$("ph-screen").addEventListener("input", e => {
+  const n = e.target.name;
+  if (ui.screen.name === "reserve" && ["from", "to", "who", "site", "siteOther"].includes(n)) form[n] = e.target.value;
+});
+$("ph-screen").addEventListener("change", e => {
+  if (ui.screen.name !== "reserve") return;
+  const n = e.target.name;
+  if (form.err) { form.err = ""; if (n !== "from" && n !== "site") render(); } // 直したら古いエラーは消す
+  if (n === "from") {
+    form.from = e.target.value;
+    if (form.from && (!form.to || form.to < form.from)) form.to = form.from; // 「いつまで」を自動でそろえる
+    render();
+  }
+  if (n === "site") { form.site = e.target.value; render(); } // 「その他」なら入力欄を出す
+});
 document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("modal").hidden) closeModal(); });
 document.addEventListener("toggle", e => { if (e.target.matches && e.target.matches("details.retired")) ui.retiredOpen = e.target.open; }, true);
 wide.addEventListener("change", applyView);
@@ -425,7 +606,7 @@ let started = false;
 function startSync() {
   if (started) return; started = true;
   const loaded = new Set();
-  const done = k => { loaded.add(k); S.ready = loaded.size >= 3; S.error = ""; render(); };
+  const done = k => { loaded.add(k); S.ready = loaded.size >= 3; S.error = ""; refresh(); };
   onSnapshot(collection(db, "vehicles"), snap => {
     S.vehicles = snapList(snap).sort((a, b) => millis(a.createdAt) - millis(b.createdAt));
     done("v");
@@ -437,7 +618,7 @@ function startSync() {
   onSnapshot(doc(db, "settings", "app"), d => {
     S.settingsExists = d.exists();
     S.settings = { ...DEFAULT_SETTINGS, ...(d.data() || {}) };
-    render();
+    refresh();
   }, onErr);
 }
 

@@ -22,6 +22,11 @@ service cloud.firestore {
     function isSample() {
       return resource.data.get('sample', false) == true;
     }
+    // サンプルの車に付いている予約・修理（試しに使ったときの記録）も消せるようにする
+    function onSampleVehicle() {
+      let path = /databases/$(database)/documents/vehicles/$(resource.data.vehicleId);
+      return exists(path) && get(path).data.get('sample', false) == true;
+    }
 
     // ---- 車両 ----
     function validVehicle(d) {
@@ -58,7 +63,7 @@ service cloud.firestore {
     match /reservations/{reservationId} {
       allow read: if signedIn();
       allow create, update: if signedIn() && validReservation(request.resource.data);
-      allow delete: if signedIn() && isSample();
+      allow delete: if signedIn() && (isSample() || onSampleVehicle());
     }
 
     // ---- 修理依頼 ----
@@ -74,7 +79,7 @@ service cloud.firestore {
     match /repairs/{repairId} {
       allow read: if signedIn();
       allow create, update: if signedIn() && validRepair(request.resource.data);
-      allow delete: if signedIn() && isSample();
+      allow delete: if signedIn() && (isSample() || onSampleVehicle());
     }
 
     // ---- 設定（名前・現場・駐車場のリストなど） ----
