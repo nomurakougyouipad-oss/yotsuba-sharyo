@@ -7,7 +7,7 @@
   --fix:#C8443A; --fix-bg:#F9E1DE;
   --plate:#F5F7F2; --plate-ink:#1B222B;
   /* 文字・枠線に使う色（ライトモードは上と同じ。ダークモードだけ明るくして背景に沈まないようにする） */
-  --steel-t:var(--steel); --free-t:var(--free); --use-t:var(--use); --fix-t:var(--fix); --line-strong:var(--line);
+  --steel-t:var(--steel); --steel-t-ink:#FFFFFF; --free-t:var(--free); --use-t:var(--use); --fix-t:var(--fix); --line-strong:var(--line);
   box-sizing:border-box;
   padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
 }
@@ -15,13 +15,13 @@
   :root:not([data-theme="light"]){
     --bg:#171A1E; --paper:#22262C; --ink:#EEF0EC; --mute:#A3ABB5; --line:#3A4048;
     --free-bg:#1E3A2A; --use-bg:#3E2E15; --fix-bg:#3F2220; --plate:#F5F7F2;
-    --steel-t:#A9CBEF; --free-t:#6BD197; --use-t:#F2AE55; --fix-t:#FF8F85; --line-strong:#6B7480;
+    --steel-t:#A9CBEF; --steel-t-ink:#16202B; --free-t:#6BD197; --use-t:#F2AE55; --fix-t:#FF8F85; --line-strong:#6B7480;
   }
 }
 :root[data-theme="dark"]{
   --bg:#171A1E; --paper:#22262C; --ink:#EEF0EC; --mute:#A3ABB5; --line:#3A4048;
   --free-bg:#1E3A2A; --use-bg:#3E2E15; --fix-bg:#3F2220; --plate:#F5F7F2;
-  --steel-t:#A9CBEF; --free-t:#6BD197; --use-t:#F2AE55; --fix-t:#FF8F85; --line-strong:#6B7480;
+  --steel-t:#A9CBEF; --steel-t-ink:#16202B; --free-t:#6BD197; --use-t:#F2AE55; --fix-t:#FF8F85; --line-strong:#6B7480;
 }
 html{scroll-padding-top:env(safe-area-inset-top,0px)}
 *{box-sizing:border-box}
@@ -51,10 +51,15 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:3px solid v
 .tabs button .badge{position:absolute;margin-left:34px;margin-top:-2px;background:var(--fix);color:#fff;border-radius:999px;font-size:11px;padding:1px 6px;font-weight:700}
 
 /* ---- chips ---- */
-.chips{display:flex;gap:8px;margin-bottom:8px}
-.chips.types{margin-bottom:12px}
-.chips.types .chip{font-size:13px;padding:6px 12px;background:var(--bg);border-color:transparent}
-.chips.types .chip.on{background:var(--steel);color:#fff;border-color:var(--steel)}
+/* 一覧の絞り込み2段：角丸の四角で、段ごとに横いっぱい均等（上3つ・下4つ）。選んでいる色は上下同じ */
+.chips{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-bottom:8px}
+.chips.types{grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:14px}
+.chips .chip{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;column-gap:4px;min-width:0;min-height:48px;padding:4px 6px;border-radius:10px;border:1.5px solid var(--line-strong);background:var(--paper);color:var(--ink);font-size:16px;font-weight:700;line-height:1.2;white-space:nowrap;text-align:center}
+.chips .chip .n{margin-left:0;font-weight:500;opacity:.75}
+/* 下の段は少し控えめ（背景は薄いグレー、枠なし、文字小さめ） */
+.chips.types .chip{min-height:44px;padding:3px 4px;font-size:clamp(12px,3.7vw,14px);background:var(--bg);border-color:transparent}
+.chips .chip.on,.chips.types .chip.on{background:var(--steel-t);border-color:var(--steel-t);color:var(--steel-t-ink)}
+.chips .chip.on .n{opacity:.85}
 .chip{border:1.5px solid var(--line);background:var(--paper);border-radius:999px;padding:7px 14px;font-weight:700;font-size:14px}
 .chip.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
 .chip .n{opacity:.7;margin-left:4px;font-weight:500}
@@ -305,7 +310,6 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
 .two > *,.ngrid > *,.rphotos > *,.lots-in > *,.madd > *{min-width:0}
 .ngrid{grid-template-columns:repeat(3,minmax(0,1fr))}
 .nchip{overflow:hidden;overflow-wrap:anywhere;word-break:normal}
-.chips{flex-wrap:wrap}
 /* 長い文は折り返す */
 .ferr,.errbar,.sub,.legend,.sheet-title,.done h2,.done p,.welcome h2,.row .v,.li .t,.li .s,.empty,.toast,.mgroup{overflow-wrap:anywhere;min-width:0}
 .row .v{min-width:0}
