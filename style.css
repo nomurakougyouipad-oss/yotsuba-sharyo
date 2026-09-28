@@ -355,3 +355,15 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
 /* 返却：駐車場が4つ以上のときはボタンを少し詰めて、スマホの1画面に収める */
 .opts.compact{gap:8px}
 .opts.compact .opt{padding:13px 18px;font-size:18px}
+
+/* ---- 専用・必要な免許の札、一時的に隠す ---- */
+.vtags{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.vtag{display:inline-block;font-size:12px;font-weight:700;line-height:1.4;padding:2px 7px;border-radius:6px;white-space:nowrap}
+.vtag.own{background:color-mix(in srgb,var(--steel-t) 14%,var(--paper));color:var(--steel-t)}
+.vtag.lic{background:var(--use-bg);color:var(--use-t);cursor:help}
+.hero .vtags{justify-content:center;margin-top:0}
+.licnote{font-size:12px;font-weight:500;color:var(--mute);margin-top:2px;line-height:1.5}
+.licwarn{background:var(--use-bg);color:var(--use-t);border-radius:12px;padding:10px 12px;font-weight:900;font-size:15px;margin:0 0 14px}
+.licwarn small{display:block;margin-top:4px;font-size:13px;font-weight:500;color:var(--ink);line-height:1.5}
+.ownnote{text-align:center;color:var(--mute);font-weight:700;margin:4px 0}
+.table td.kind .vtags{margin-top:3px}

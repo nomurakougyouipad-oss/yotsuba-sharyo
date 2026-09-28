@@ -125,6 +125,27 @@ function repairText(r) { const s = (r.symptoms || []).join("・"); return s && r
 const lotOf = v => v.currentLot || v.homeLot || "";
 const alertDays = () => Number(S.settings.shakenAlertDays) || 30;
 
+/* ---------- 必要な免許・専用の車・一時的に隠す ---------- */
+const LICENSES = ["普通", "準中型5t", "準中型", "中型8t", "中型", "大型"];
+const LICENSE_NOTE = {
+  "普通": "普通免許で運転できます",
+  "準中型5t": "平成29年3月11日までに普通免許を取った人（平成19年6月2日〜平成29年3月11日に取った人は準中型5t限定、平成19年6月1日までに取った人は中型8t限定）、または準中型以上の免許の人",
+  "準中型": "平成19年6月1日までに普通免許を取った人（中型8t限定）、または準中型（限定なし）・中型以上の免許の人",
+  "中型8t": "平成19年6月1日までに普通免許を取った人（中型8t限定）、または中型（限定なし）・大型の免許の人",
+  "中型": "中型（限定なし）または大型の免許の人",
+  "大型": "大型免許の人",
+};
+const licOf = v => (LICENSES.includes(v.license) ? v.license : "普通");
+const shown = () => active().filter(v => !v.hidden); // 一時的に隠した車は一覧・車検・上のパネルに出さない
+// 専用の車は、専用の人と PC（広い画面）からだけ予約できる
+const canReserve = v => !v.owner || v.owner === ME || wide.matches;
+function vehicleTags(v) {
+  const l = licOf(v);
+  const t = (v.owner ? `<span class="vtag own">${esc(v.owner)}さん専用</span>` : "")
+    + (l !== "普通" ? `<span class="vtag lic" title="${esc(l)}：${esc(LICENSE_NOTE[l])}">${l}</span>` : "");
+  return t ? `<div class="vtags">${t}</div>` : "";
+}
+
 /* ---------- 部品（試作と同じ見た目） ---------- */
 function carColor(v) { let h = 0; for (const c of v.id) h = (h * 31 + c.charCodeAt(0)) >>> 0; return CAR_COLORS[h % CAR_COLORS.length]; }
 function carSvg(color) {
@@ -203,7 +224,7 @@ function renderPhone() {
     title = ""; body = doneScreen(sc);
   } else {
     const v = byId(sc.id);
-    if (!v || v.retired) { ui.screen = { name: "list" }; return renderPhone(); }
+    if (!v || v.retired || v.hidden) { ui.screen = { name: "list" }; return renderPhone(); }
     back = sc.name === "detail" ? { name: "list" } : { name: "detail", id: v.id };
     if (sc.name === "detail") { title = esc(v.kind); body = detail(v); }
     if (sc.name === "reserve") { title = "予約"; body = reserveForm(v); }
@@ -226,7 +247,7 @@ function nameScreen(first) {
 
 function listShaken() {
   if (!S.ready) return `<div class="loading">読み込み中…</div>`;
-  const vs = byShaken(active());
+  const vs = byShaken(shown());
   if (!vs.length) return `<div class="empty">まだ車が登録されていません</div>`;
   return `<p class="sub" style="margin-top:0">期限が近い順</p>` + vs.map(v => `
   <div class="li tap" data-act="detail" data-id="${v.id}" role="button" tabindex="0">
@@ -236,7 +257,7 @@ function listShaken() {
 
 function listCars() {
   if (!S.ready) return `<div class="loading">読み込み中…</div>`;
-  const all = active();
+  const all = shown();
   if (!all.length) return `<div class="empty">まだ車が登録されていません。<br>事務所のPCから登録してください</div>`;
   const byType = all.filter(v => ui.tfilter === "all" || v.type === ui.tfilter);
   const n = k => byType.filter(v => k === "all" || status(v) === k).length;
@@ -253,7 +274,7 @@ function listCars() {
     <div class="band ${st}"><span>${LABEL[st]}</span>${bandExtra(v, st, use)}</div>
     <div class="body">
       ${thumbHtml(v)}
-      <div class="meta"><div class="r1">${plateHtml(v, true)}${shakenTag(v)}</div><div class="kind">${esc(v.kind)}</div><div class="who">${useText(v, use, fix)}</div></div>
+      <div class="meta"><div class="r1">${plateHtml(v, true)}${shakenTag(v)}</div><div class="kind">${esc(v.kind)}</div>${vehicleTags(v)}<div class="who">${useText(v, use, fix)}</div></div>
     </div>
   </button>`;
   }).join("");
@@ -269,11 +290,14 @@ function detail(v) {
     !use ? ["置いてある場所", esc(lotOf(v))] : null,
     fix ? ["修理", `<span class="warn">${esc(repairText(fix))}</span>`] : null,
     ["車検", `<span class="${shakenClass(v) ? "warn" : ""}">${jp(v.shakenDate)}（${shakenText(v)}）</span>`],
+    v.owner ? ["専用", `${esc(v.owner)}さん専用`] : null,
+    licOf(v) !== "普通" ? ["必要な免許", `${licOf(v)}以上<div class="licnote">${esc(LICENSE_NOTE[licOf(v)])}</div>`] : null,
   ].filter(Boolean);
   const actions = st === "use"
     ? `<button class="btn primary" data-act="goto" data-val="return" data-id="${v.id}">返却する</button>`
-    : (st === "free" ? `<button class="btn primary" data-act="goto" data-val="reserve" data-id="${v.id}">この車を予約する</button>` : "");
-  return `<div class="hero">${thumbHtml(v, true)}${plateHtml(v)}</div>
+    : (st === "free" ? (canReserve(v) ? `<button class="btn primary" data-act="goto" data-val="reserve" data-id="${v.id}">この車を予約する</button>`
+      : `<p class="ownnote">この車は${esc(v.owner)}さん専用です</p>`) : "");
+  return `<div class="hero">${thumbHtml(v, true)}${plateHtml(v)}${vehicleTags(v)}</div>
   <div class="rows">${rows.map(([k, val]) => `<div class="row"><span class="k">${k}</span><span class="v">${val}</span></div>`).join("")}</div>
   <div class="actions">${actions}<button class="btn ghost" data-act="goto" data-val="repair" data-id="${v.id}">修理を頼む</button></div>
   ${calendar(v)}`;
@@ -311,7 +335,9 @@ function reserveForm(v) {
   if (form.vid !== v.id) { resetForm(); form.vid = v.id; }
   form.from = form.from || t; form.to = form.to || form.from; form.site = form.site || "";
   const sites = S.settings.sites || [];
+  const lic = licOf(v);
   return `<div class="sheet-title">${esc(v.kind)}</div><p class="sub">${plateText(v)}</p>
+  ${lic !== "普通" ? `<div class="licwarn">⚠ この車は${lic}以上の免許が必要です<small>${esc(LICENSE_NOTE[lic])}</small></div>` : ""}
   <div class="field"><label>いつからいつまで</label><div class="two">
     <input type="date" name="from" value="${form.from}" aria-label="いつから">
     <input type="date" name="to" value="${form.to}" min="${form.from}" aria-label="いつまで"></div></div>
@@ -330,6 +356,7 @@ function reserveForm(v) {
 
 async function doReserve(v) {
   if (form.busy) return;
+  if (!canReserve(v)) { form.err = `この車は${v.owner}さん専用です`; render(); return; }
   const t = ymd(today());
   const who = form.other ? (form.picking ? "" : (form.who || "")) : ME;
   const site = form.site === SITE_OTHER ? String(form.siteOther || "").trim() : form.site;
@@ -501,9 +528,10 @@ function foldList(key, items, unit) {
 }
 
 function renderPc() {
-  const vs = active(), d = today();
+  const vs = shown(), d = today();
   const n = k => vs.filter(v => status(v) === k).length;
   const retired = S.vehicles.filter(v => v.retired);
+  const hiddenV = active().filter(v => v.hidden);
   const hasSample = S.vehicles.some(v => v.sample);
 
   let table;
@@ -528,7 +556,7 @@ function renderPc() {
           const use = currentUse(v);
           return `<tr class="vrow ${g}" data-act="edit" data-id="${v.id}" title="押すと修正できます">
         <td class="st"><span class="dot ${g}"></span>${LABEL[g]}</td>
-        <td>${thumbHtml(v)}</td><td>${plateHtml(v, true)}</td><td class="kind">${esc(v.kind)}</td>
+        <td>${thumbHtml(v)}</td><td>${plateHtml(v, true)}</td><td class="kind">${esc(v.kind)}${vehicleTags(v)}</td>
         <td>${use ? esc(use.who) : "—"}</td><td>${use ? `${esc(use.site)}<div class="s" style="color:var(--mute);font-size:12px">${fmt(use.from)}〜${fmt(use.to)}</div>` : "—"}</td>
         <td>${use ? "—" : esc(lotOf(v))}</td><td><span class="days ${shakenClass(v)}" style="font-size:13px">${shakenText(v)}</span></td></tr>`;
         }).join(""));
@@ -548,6 +576,11 @@ function renderPc() {
       ${futurePanel()}
     </div>
     <div class="panel wide"><h2>全車両 <button class="btn primary small" data-act="add">＋ 車両を追加</button></h2>${table}</div>
+    ${hiddenV.length ? `<details class="panel retired hiddenv"${ui.hiddenOpen ? " open" : ""}><summary>非表示中（${hiddenV.length}台）</summary>
+      <table class="table"><tbody>${hiddenV.map(v => `<tr>
+        <td>${thumbHtml(v)}</td><td>${plateHtml(v, true)}</td><td class="kind">${esc(v.kind)}${vehicleTags(v)}</td><td>${esc(v.type)}</td>
+        <td style="text-align:right"><button class="btn ghost small" data-act="unhide" data-id="${v.id}">表示に戻す</button></td></tr>`).join("")}</tbody></table>
+    </details>` : ""}
     ${retired.length ? `<details class="panel retired"${ui.retiredOpen ? " open" : ""}><summary>廃車済み（${retired.length}台）</summary>
       <table class="table"><tbody>${retired.map(v => `<tr>
         <td>${thumbHtml(v)}</td><td>${plateHtml(v, true)}</td><td class="kind">${esc(v.kind)}</td><td>${esc(v.type)}</td>
@@ -640,7 +673,7 @@ async function uploadRepairPhotos(repairId, files, onProgress) {
 // PC: 車検が近い車（60日以内。通知日数を60日より長くしたときはその日数まで）
 function shakenPanel() {
   const lim = Math.max(60, alertDays());
-  const soon = byShaken(active().filter(v => daysTo(v.shakenDate) <= lim));
+  const soon = byShaken(shown().filter(v => daysTo(v.shakenDate) <= lim));
   const f = foldList("shaken", soon, "台");
   return `<div class="panel"><h2>車検が近い車 <span class="tag">${soon.length}台</span></h2>
     ${soon.length ? f.shown.map(v => `<div class="li tap" data-act="edit" data-id="${v.id}" title="押すと車検満了日を変えられます">${plateHtml(v, true)}<div class="grow"><div class="t">${esc(v.kind)}</div><div class="s">${jp(v.shakenDate)}</div></div><span class="days ${shakenClass(v)}">${shakenText(v)}</span></div>`).join("")
@@ -650,7 +683,7 @@ function shakenPanel() {
 // PC: この先の予約（今日より後、日付順）
 function futurePanel() {
   const t = ymd(today());
-  const list = S.reservations.filter(r => !r.returnedAt && r.from > t && byId(r.vehicleId) && !byId(r.vehicleId).retired)
+  const list = S.reservations.filter(r => !r.returnedAt && r.from > t && byId(r.vehicleId) && !byId(r.vehicleId).retired && !byId(r.vehicleId).hidden)
     .sort((a, b) => (a.from > b.from ? 1 : a.from < b.from ? -1 : 0));
   const f = foldList("future", list, "件");
   return `<div class="panel"><h2>この先の予約 <span class="tag plain">${list.length}件</span></h2>
@@ -660,7 +693,7 @@ function futurePanel() {
 
 // PC: 修理依頼パネル（未対応と修理中。対応済みは出さない）
 function repairPanel() {
-  const list = sortedRepairs(S.repairs.filter(r => r.status !== "done"))
+  const list = sortedRepairs(S.repairs.filter(r => r.status !== "done" && !(byId(r.vehicleId) || {}).hidden))
     .sort((a, b) => (a.status === "in_repair") - (b.status === "in_repair")); // 未対応を上に
   const n = openCount(), f = foldList("repair", list, "件");
   return `<div class="panel rpanel"><h2>修理依頼 <span class="tag">${n}件 未対応</span></h2>
@@ -704,6 +737,13 @@ function openModal(id) {
         `<label class="chip"><input type="radio" name="type" value="${t}"${v && v.type === t ? " checked" : ""}>${t}</label>`).join("")}</div></div>
       <div class="field"><label for="f-shaken">車検満了日</label><input id="f-shaken" type="date" name="shakenDate" value="${val("shakenDate")}">
         ${v ? `<div class="hint">車検を受けたら、新しい満了日に変えて保存してください</div>` : ""}</div>
+      <div class="field"><label for="f-lic">必要な免許</label><select id="f-lic" name="license">
+        ${LICENSES.map(l => `<option${(v ? licOf(v) : "普通") === l ? " selected" : ""}>${l}</option>`).join("")}</select></div>
+      <div class="field"><label for="f-owner">専用（任意）</label><select id="f-owner" name="owner">
+        <option value="">（なし：だれでも使える）</option>
+        ${MGROUPS.map(g => { const names = activeMembers().filter(m => mGroupOf(m) === g).map(m => m.name).sort(byLen);
+          return names.length ? `<optgroup label="${g}">${names.map(n => `<option${v && v.owner === n ? " selected" : ""}>${esc(n)}</option>`).join("")}</optgroup>` : ""; }).join("")}
+        ${v && v.owner && !activeMembers().some(m => m.name === v.owner) ? `<option selected>${esc(v.owner)}</option>` : ""}</select></div>
       <div class="field"><label for="f-lot">置き場所</label><select id="f-lot" name="lot">
         ${lots.map(l => `<option${(v ? lotOf(v) === l : l === lots[0]) ? " selected" : ""}>${esc(l)}</option>`).join("")}</select></div>
       <div class="field"><label>写真（任意）</label>
@@ -711,7 +751,7 @@ function openModal(id) {
         <label class="photo-btn">📷 ${v && v.photoUrl ? "写真を変える" : "写真を選ぶ"}<input type="file" accept="image/*" hidden id="f-photo"></label></div></div>
     </div>
     <div class="mfoot">
-      ${v ? `<button type="button" class="btn danger" data-act="retire">廃車にする</button>` : ""}
+      ${v ? `<button type="button" class="btn danger" data-act="retire">廃車にする</button><button type="button" class="btn ghost" data-act="hideCar">${v.hidden ? "表示に戻す" : "一時的に隠す"}</button>` : ""}
       <span class="sp"></span>
       <button type="button" class="btn ghost" data-act="close">やめる</button>
       <button type="submit" class="btn primary">${v ? "保存する" : "登録する"}</button>
@@ -888,6 +928,7 @@ function saveVehicle(form) {
   const data = {
     plateArea: g("plateArea"), plateClass: toHalf(g("plateClass")).toUpperCase(), plateKana: g("plateKana"),
     plateNum: toHalf(g("plateNum")), kind: g("kind"), type: g("type"), shakenDate: g("shakenDate"), homeLot: g("lot"), currentLot: g("lot"), // 置き場所は1つ（通常・今の両方に同じ値）
+    license: LICENSES.includes(g("license")) ? g("license") : "普通", owner: g("owner") || null,
   };
   let err = "";
   if (!data.plateArea || !data.plateClass || !data.plateKana || !data.plateNum) err = "ナンバーを4つとも入れてください";
@@ -908,7 +949,7 @@ function saveVehicle(form) {
   const p = modalId
     ? updateDoc(ref, { ...data, updatedAt: serverTimestamp() })
     : setDoc(ref, {
-        ...data, photoUrl: null, status: "free", retired: false,
+        ...data, photoUrl: null, status: "free", retired: false, hidden: false,
         createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
       });
   const file = pendingPhoto && pendingPhoto.file;
@@ -925,6 +966,15 @@ function retireVehicle(id) {
   updateDoc(doc(db, "vehicles", id), { retired: true, retiredAt: serverTimestamp(), updatedAt: serverTimestamp() })
     .catch(e => { console.error(e); toast("廃車にできませんでした"); });
   toast("廃車にしました");
+}
+// 一時的に隠す（廃車とは別。データ・予約・修理の記録はそのまま）
+function setHidden(id, on) {
+  const v = byId(id); if (!v) return;
+  if (on && !confirm(`「${v.kind}（${v.plateKana} ${v.plateNum}）」を一時的に隠しますか？\n\nスマホの一覧・車検タブと、PCの上のパネルに出なくなります。\n車のデータ・予約・修理の記録はそのまま残り、「非表示中」から戻せます。`)) return;
+  closeModal();
+  updateDoc(doc(db, "vehicles", id), { hidden: on, updatedAt: serverTimestamp() })
+    .catch(e => { console.error(e); toast("変更できませんでした"); });
+  toast(on ? "一時的に隠しました" : "表示に戻しました");
 }
 function restoreVehicle(id) {
   updateDoc(doc(db, "vehicles", id), { retired: false, retiredAt: null, updatedAt: serverTimestamp() })
@@ -1049,6 +1099,8 @@ document.addEventListener("click", e => {
     case "memAdd": addMember(); break;
     case "retire": retireVehicle(modalId); break;
     case "restore": restoreVehicle(id); break;
+    case "hideCar": { const v = byId(modalId); if (v) setHidden(v.id, !v.hidden); break; }
+    case "unhide": setHidden(id, false); break;
     case "seed": seed(); break;
     case "unseed": unseed(); break;
   }
@@ -1100,7 +1152,11 @@ document.addEventListener("keydown", e => {
   if ((e.key === "Enter" || e.key === " ") && e.target.matches && e.target.matches("tr.grp[data-act]")) { e.preventDefault(); e.target.click(); }
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("modal").hidden) closeModal(); });
-document.addEventListener("toggle", e => { if (e.target.matches && e.target.matches("details.retired")) ui.retiredOpen = e.target.open; }, true);
+document.addEventListener("toggle", e => {
+  if (!e.target.matches) return;
+  if (e.target.matches("details.hiddenv")) ui.hiddenOpen = e.target.open;
+  else if (e.target.matches("details.retired")) ui.retiredOpen = e.target.open;
+}, true);
 wide.addEventListener("change", applyView);
 // 日付が変わったら表示（使用中／空き）を更新
 let shownDay = ymd(today());

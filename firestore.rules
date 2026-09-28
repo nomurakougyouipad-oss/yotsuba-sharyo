@@ -42,6 +42,9 @@ service cloud.firestore {
         && optStr(d, 'currentLot', 30)
         && optStr(d, 'photoUrl', 2000)
         && (!('status' in d) || d.status in ['free', 'use', 'fix'])
+        && (!('license' in d) || d.license in ['普通', '準中型5t', '準中型', '中型8t', '中型', '大型'])
+        && optStr(d, 'owner', 40)
+        && (!('hidden' in d) || d.hidden is bool)
         && d.retired is bool;
     }
     match /vehicles/{vehicleId} {
