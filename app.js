@@ -482,6 +482,24 @@ function doneScreen(sc) {
 }
 
 /* ================= PC版ダッシュボード ================= */
+/* ---------- PC の表示の状態（絞り込み・グループの開閉・パネルの開閉。開き直しても覚えておく） ---------- */
+const pcUi = (() => {
+  const def = { filter: "all", type: "all", groups: { use: true, free: false, fix: true }, panels: { shaken: false, repair: false, future: false } };
+  let p = {}; try { p = JSON.parse(lsGet("sharyo_pc_ui") || "{}") || {}; } catch (e) { p = {}; }
+  return { filter: p.filter || def.filter, type: p.type || def.type, groups: { ...def.groups, ...(p.groups || {}) }, panels: { ...def.panels, ...(p.panels || {}) } };
+})();
+const savePcUi = () => lsSet("sharyo_pc_ui", JSON.stringify(pcUi));
+const PC_FILTERS = [["all", "全部"], ["free", "空き"], ["use", "使用中"], ["fix", "修理中"]];
+const PANEL_LIMIT = 3;
+// パネルの中身を3件まで出し、残りは「＋ ほか○台を表示」で開く
+function foldList(key, items, unit) {
+  const open = !!pcUi.panels[key], hidden = items.length - PANEL_LIMIT;
+  return {
+    shown: open ? items : items.slice(0, PANEL_LIMIT),
+    more: hidden > 0 ? `<button class="more" data-act="pcPanel" data-val="${key}" aria-expanded="${open}">${open ? `− ${PANEL_LIMIT}${unit}だけ表示` : `＋ ほか${hidden}${unit}を表示`}</button>` : "",
+  };
+}
+
 function renderPc() {
   const vs = active(), d = today();
   const n = k => vs.filter(v => status(v) === k).length;
@@ -492,19 +510,31 @@ function renderPc() {
   if (!S.ready) table = `<div class="loading">読み込み中…</div>`;
   else if (!vs.length) table = `<div class="empty">まだ車が登録されていません。「＋ 車両を追加」から登録してください${
     !S.vehicles.length ? `<div style="margin-top:12px"><button class="btn ghost small" data-act="seed">サンプルデータ（8台）を入れて試す</button></div>` : ""}</div>`;
-  else table = `<table class="table"><thead><tr><th>状態</th><th>写真</th><th>ナンバー</th><th>車種</th><th>使っている人</th><th>現場</th><th>置き場所</th><th>車検</th></tr></thead><tbody>
+  else {
+    const typeOK = v => pcUi.type === "all" || v.type === pcUi.type;
+    const stOK = v => pcUi.filter === "all" || status(v) === pcUi.filter;
+    const byType = vs.filter(typeOK), list = byType.filter(stOK);
+    const n1 = k => byType.filter(v => k === "all" || status(v) === k).length;
+    const n2 = t => vs.filter(v => (t === "all" || v.type === t) && stOK(v)).length;
+    const tabs = `<div class="pcfilter"><div class="chips four">${PC_FILTERS.map(([k, l]) =>
+      `<button class="chip ${pcUi.filter === k ? "on" : ""}" data-act="pcFilter" data-val="${k}">${l}<span class="n">${n1(k)}</span></button>`).join("")}</div>
+      <div class="chips types four">${[["all", "全種類"], ...TYPES.map(t => [t, t])].map(([k, l]) =>
+      `<button class="chip ${pcUi.type === k ? "on" : ""}" data-act="pcType" data-val="${k}">${l}<span class="n">${n2(k)}</span></button>`).join("")}</div></div>`;
+    table = tabs + (!list.length ? `<div class="empty">この条件の車はありません</div>` : `<table class="table"><thead><tr><th>状態</th><th>写真</th><th>ナンバー</th><th>車種</th><th>使っている人</th><th>現場</th><th>置き場所</th><th>車検</th></tr></thead><tbody>
       ${["use", "free", "fix"].map(g => {
-        const rows = vs.filter(v => status(v) === g); if (!rows.length) return "";
-        return `<tr class="grp ${g}"><td colspan="8">${LABEL[g]}<span>${rows.length}台</span></td></tr>` + rows.map(v => {
+        const rows = list.filter(v => status(v) === g); if (!rows.length) return "";
+        const open = !!pcUi.groups[g];
+        return `<tr class="grp ${g}${open ? "" : " closed"}" data-act="pcGroup" data-val="${g}" tabindex="0" role="button" aria-expanded="${open}" title="押すと${open ? "閉じます" : "開きます"}"><td colspan="8"><span class="caret">${open ? "▼" : "▶"}</span>${LABEL[g]}<span>${rows.length}台</span></td></tr>` + (!open ? "" : rows.map(v => {
           const use = currentUse(v);
           return `<tr class="vrow ${g}" data-act="edit" data-id="${v.id}" title="押すと修正できます">
         <td class="st"><span class="dot ${g}"></span>${LABEL[g]}</td>
         <td>${thumbHtml(v)}</td><td>${plateHtml(v, true)}</td><td class="kind">${esc(v.kind)}</td>
         <td>${use ? esc(use.who) : "—"}</td><td>${use ? `${esc(use.site)}<div class="s" style="color:var(--mute);font-size:12px">${fmt(use.from)}〜${fmt(use.to)}</div>` : "—"}</td>
         <td>${use ? "—" : esc(lotOf(v))}</td><td><span class="days ${shakenClass(v)}" style="font-size:13px">${shakenText(v)}</span></td></tr>`;
-        }).join("");
+        }).join(""));
       }).join("")}
-      </tbody></table>`;
+      </tbody></table>`);
+  }
 
   $("pc").innerHTML = `
   <div class="top"><h1>社用車 今日の状況</h1><span class="today">${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日（${DOW[d.getDay()]}）</span>
@@ -611,9 +641,10 @@ async function uploadRepairPhotos(repairId, files, onProgress) {
 function shakenPanel() {
   const lim = Math.max(60, alertDays());
   const soon = byShaken(active().filter(v => daysTo(v.shakenDate) <= lim));
+  const f = foldList("shaken", soon, "台");
   return `<div class="panel"><h2>車検が近い車 <span class="tag">${soon.length}台</span></h2>
-    ${soon.length ? soon.map(v => `<div class="li tap" data-act="edit" data-id="${v.id}" title="押すと車検満了日を変えられます">${plateHtml(v, true)}<div class="grow"><div class="t">${esc(v.kind)}</div><div class="s">${jp(v.shakenDate)}</div></div><span class="days ${shakenClass(v)}">${shakenText(v)}</span></div>`).join("")
-      : `<div class="empty">${lim}日以内の車検はありません</div>`}
+    ${soon.length ? f.shown.map(v => `<div class="li tap" data-act="edit" data-id="${v.id}" title="押すと車検満了日を変えられます">${plateHtml(v, true)}<div class="grow"><div class="t">${esc(v.kind)}</div><div class="s">${jp(v.shakenDate)}</div></div><span class="days ${shakenClass(v)}">${shakenText(v)}</span></div>`).join("")
+      + f.more : `<div class="empty">${lim}日以内の車検はありません</div>`}
   </div>`;
 }
 // PC: この先の予約（今日より後、日付順）
@@ -621,8 +652,9 @@ function futurePanel() {
   const t = ymd(today());
   const list = S.reservations.filter(r => !r.returnedAt && r.from > t && byId(r.vehicleId) && !byId(r.vehicleId).retired)
     .sort((a, b) => (a.from > b.from ? 1 : a.from < b.from ? -1 : 0));
-  return `<div class="panel"><h2>この先の予約</h2>
-    ${list.map(r => { const v = byId(r.vehicleId); return `<div class="li"><div class="days" style="background:var(--bg);color:var(--ink)">${fmt(r.from)}〜${fmt(r.to)}</div><div class="grow"><div class="t">${esc(v.kind)}</div><div class="s">${esc(r.who)}さん　${esc(r.site)}</div></div></div>`; }).join("") || `<div class="empty">予約はありません</div>`}
+  const f = foldList("future", list, "件");
+  return `<div class="panel"><h2>この先の予約 <span class="tag plain">${list.length}件</span></h2>
+    ${f.shown.map(r => { const v = byId(r.vehicleId); return `<div class="li"><div class="days" style="background:var(--bg);color:var(--ink)">${fmt(r.from)}〜${fmt(r.to)}</div><div class="grow"><div class="t">${esc(v.kind)}</div><div class="s">${esc(r.who)}さん　${esc(r.site)}</div></div></div>`; }).join("") + f.more || `<div class="empty">予約はありません</div>`}
   </div>`;
 }
 
@@ -630,9 +662,9 @@ function futurePanel() {
 function repairPanel() {
   const list = sortedRepairs(S.repairs.filter(r => r.status !== "done"))
     .sort((a, b) => (a.status === "in_repair") - (b.status === "in_repair")); // 未対応を上に
-  const n = openCount();
+  const n = openCount(), f = foldList("repair", list, "件");
   return `<div class="panel rpanel"><h2>修理依頼 <span class="tag">${n}件 未対応</span></h2>
-    ${list.length ? list.map(r => {
+    ${list.length ? f.shown.map(r => {
       const photos = r.photos || [];
       const btns = r.status === "in_repair"
         ? `<button class="btn free small" data-act="repairSet" data-id="${r.id}" data-val="done">修理完了（空きに戻す）</button>`
@@ -643,7 +675,7 @@ function repairPanel() {
           <div class="s">${repairKind(r)}　${repairDate(r)}　${esc(r.reportedBy || "")}</div>
           ${photos.length ? `<div class="rthumbs">${photos.map(p => `<a href="${esc(p.photoUrl)}" target="_blank" rel="noopener" title="大きく見る"><img src="${esc(p.thumbUrl || p.photoUrl)}" alt="修理の写真" loading="lazy"></a>`).join("")}</div>` : ""}
         </div><div class="rbtns">${btns}</div></div>`;
-    }).join("") : `<div class="empty">未対応の依頼はありません</div>`}
+    }).join("") + f.more : `<div class="empty">未対応の依頼はありません</div>`}
   </div>`;
 }
 
@@ -983,6 +1015,10 @@ document.addEventListener("click", e => {
     case "view": lsSet("sharyo_view", val); applyView(); break;
     case "tab": setTab(val); break;
     case "filter": ui.filter = val; render(); break;
+    case "pcFilter": pcUi.filter = val; if (val !== "all") pcUi.groups[val] = true; savePcUi(); render(); break; // 状態を選んだら、そのグループを開く
+    case "pcType": pcUi.type = val; savePcUi(); render(); break;
+    case "pcGroup": pcUi.groups[val] = !pcUi.groups[val]; savePcUi(); render(); break;
+    case "pcPanel": pcUi.panels[val] = !pcUi.panels[val]; savePcUi(); render(); break;
     case "tfilter": ui.tfilter = val; render(); break;
     case "detail": go({ name: "detail", id }); break;
     case "back": go(ui.backTo || { name: "list" }); break;
@@ -1055,6 +1091,7 @@ $("ph-screen").addEventListener("change", e => {
 });
 document.addEventListener("keydown", e => {
   if (e.key === "Enter" && e.target.matches && e.target.matches(".li.tap")) e.target.click();
+  if ((e.key === "Enter" || e.key === " ") && e.target.matches && e.target.matches("tr.grp[data-act]")) { e.preventDefault(); e.target.click(); }
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("modal").hidden) closeModal(); });
 document.addEventListener("toggle", e => { if (e.target.matches && e.target.matches("details.retired")) ui.retiredOpen = e.target.open; }, true);

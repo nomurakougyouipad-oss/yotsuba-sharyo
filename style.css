@@ -339,3 +339,15 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
   html,body{overscroll-behavior:none}
   .screen{overscroll-behavior-y:contain}
 }
+
+/* ---- PC：全車両の絞り込み・グループの開閉、上のパネルの「ほか○件を表示」 ---- */
+.pcfilter{padding:14px 14px 2px;max-width:760px}
+.chips.four{grid-template-columns:repeat(4,minmax(0,1fr))}
+.table tr.grp{cursor:pointer;user-select:none}
+.table tr.grp:hover td,.table tr.grp:focus-visible td{background:color-mix(in srgb,var(--steel-t) 7%,var(--paper))}
+.table tr.grp:focus-visible{outline:3px solid var(--steel-t);outline-offset:-3px}
+.table tr.grp .caret{display:inline-block;width:1.3em;font-size:12px}
+.table tr.grp.closed td{padding-bottom:14px;border-bottom:1px solid var(--line)}
+.more{display:block;width:100%;min-height:52px;padding:14px;border:0;border-top:1.5px solid var(--line);background:var(--paper);color:var(--steel-t);font-size:17px;font-weight:900;cursor:pointer}
+.more:hover{background:color-mix(in srgb,var(--steel-t) 7%,var(--paper))}
+.tag.plain{background:var(--bg);color:var(--mute)}
