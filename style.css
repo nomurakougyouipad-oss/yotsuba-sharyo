@@ -267,7 +267,7 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:3px solid v
 /* ---- 段階5: 車検一覧・設定 ---- */
 .li.tap{cursor:pointer}
 .pc .top .btn.small{align-self:center}
-.lots-in{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.lots-in{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
 .days-in{display:flex;align-items:center;gap:10px}
 .days-in input{width:120px}
 .days-in span{font-weight:700}
@@ -351,3 +351,7 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
 .more{display:block;width:100%;min-height:52px;padding:14px;border:0;border-top:1.5px solid var(--line);background:var(--paper);color:var(--steel-t);font-size:17px;font-weight:900;cursor:pointer}
 .more:hover{background:color-mix(in srgb,var(--steel-t) 7%,var(--paper))}
 .tag.plain{background:var(--bg);color:var(--mute)}
+
+/* 返却：駐車場が4つ以上のときはボタンを少し詰めて、スマホの1画面に収める */
+.opts.compact{gap:8px}
+.opts.compact .opt{padding:13px 18px;font-size:18px}

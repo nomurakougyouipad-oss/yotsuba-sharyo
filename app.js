@@ -370,7 +370,7 @@ async function doReserve(v) {
 /* ---------- 返却 ---------- */
 function returnForm(v) {
   return `<div class="sheet-title">どこに止めましたか？</div><p class="sub">${esc(v.kind)}　${esc(v.plateKana)} ${esc(v.plateNum)}</p>
-  <div class="opts">${(S.settings.lots || []).map(l => `<button class="opt" data-act="return" data-id="${v.id}" data-val="${esc(l)}">${esc(l)}<span>›</span></button>`).join("")}</div>`;
+  <div class="opts${(S.settings.lots || []).length > 3 ? " compact" : ""}">${(S.settings.lots || []).filter(Boolean).slice(0, LOT_MAX).map(l => `<button class="opt" data-act="return" data-id="${v.id}" data-val="${esc(l)}">${esc(l)}<span>›</span></button>`).join("")}</div>`;
 }
 function doReturn(v, lot) {
   const use = currentUse(v);
@@ -731,11 +731,11 @@ function closeModal() {
 }
 
 /* ---------- 設定（PCのみ） ---------- */
-const LOT_COUNT = 3;
+const LOT_MAX = 5; // 駐車場は5ヶ所まで（空欄は使わない）
 function openSettings() {
   const st = S.settings;
   const lines = a => esc((a || []).join("\n"));
-  const lots = [...(st.lots || [])]; while (lots.length < LOT_COUNT) lots.push("");
+  const lots = [...(st.lots || [])].slice(0, LOT_MAX); while (lots.length < LOT_MAX) lots.push("");
   modalId = null;
   $("modal").innerHTML = `<div class="overlay"><form class="modal panel" id="sform" novalidate>
     <h2>設定<button type="button" class="x" data-act="close" aria-label="閉じる">×</button></h2>
@@ -757,9 +757,9 @@ function openSettings() {
       <div class="field"><label for="s-sites">現場リスト</label>
         <textarea id="s-sites" name="sites" rows="6">${lines(st.sites)}</textarea>
         <div class="hint">1行に1つ。予約の「行く現場」に出ます（リストにない現場は「その他」で入力できます）</div></div>
-      <div class="field"><label>駐車場（${LOT_COUNT}ヶ所）</label>
-        <div class="lots-in">${lots.slice(0, LOT_COUNT).map((l, i) => `<input name="lot${i}" value="${esc(l)}" aria-label="駐車場${i + 1}" maxlength="30" autocomplete="off">`).join("")}</div>
-        <div class="hint">返却のときのボタンに出ます。名前を変えると、その駐車場にある車の置き場所も新しい名前になります</div></div>
+      <div class="field"><label>駐車場（${LOT_MAX}ヶ所まで）</label>
+        <div class="lots-in">${lots.map((l, i) => `<input name="lot${i}" value="${esc(l)}" aria-label="駐車場${i + 1}" maxlength="30" autocomplete="off">`).join("")}</div>
+        <div class="hint">返却のときのボタンに、入っている駐車場だけが出ます（空欄は使いません。1ヶ所は必要）。名前を変えると、その駐車場にある車の置き場所も新しい名前になります</div></div>
       <div class="field"><label for="s-days">車検の通知（何日前から）</label>
         <div class="days-in"><input id="s-days" name="shakenAlertDays" type="number" inputmode="numeric" min="1" max="365" value="${esc(st.shakenAlertDays || 30)}"><span>日前から</span></div>
         <div class="hint">スマホの車両カードに「🔔 車検」が出始める日数です（はじめは30日）</div></div>
@@ -846,19 +846,29 @@ function saveSettings(form) {
   const f = new FormData(form);
   const list = k => [...new Set(String(f.get(k) || "").split(/\r?\n/).map(x => x.trim()).filter(Boolean))];
   const sites = list("sites").map(x => x.slice(0, 100));
-  const lots = Array.from({ length: LOT_COUNT }, (_, i) => String(f.get(`lot${i}`) || "").trim());
+  const slots = Array.from({ length: LOT_MAX }, (_, i) => String(f.get(`lot${i}`) || "").trim()); // 欄ごとの値（空欄あり）
+  const lots = slots.filter(Boolean);
   const days = Number(toHalf(String(f.get("shakenAlertDays") || "")));
   let err = "";
-  if (lots.some(l => !l)) err = `駐車場を${LOT_COUNT}つとも入れてください`;
+  if (!lots.length) err = "駐車場を1ヶ所以上入れてください";
   else if (new Set(lots).size < lots.length) err = "同じ名前の駐車場があります";
   else if (!Number.isInteger(days) || days < 1 || days > 365) err = "車検の通知は 1〜365 の数字で入れてください";
   if (err) { const e = $("ferr"); e.textContent = err; e.hidden = false; return; }
 
+  // 駐車場の名前を変えたら（同じ欄で名前が変わったら）、その名前の車の「置き場所」も書きかえる
+  const old = S.settings.lots || [];
+  const renames = new Map(old.map((o, i) => [o, slots[i]]).filter(([o, n]) => o && n && o !== n && !lots.includes(o)));
+  // 消した駐車場に車が残っているときは確かめる（車の置き場所は、その名前のまま残る）
+  const removed = old.filter(o => !lots.includes(o) && !renames.has(o));
+  const left = S.vehicles.filter(v => !v.retired && (removed.includes(v.homeLot) || removed.includes(v.currentLot)));
+  if (left.length && !confirm(`「${removed.join("」「")}」を駐車場から外します。
+この駐車場が置き場所になっている車が ${left.length}台あります（置き場所の名前はそのまま残ります）。
+あとで「車両を修正」で置き場所を直してください。
+
+保存しますか？`)) return;
+
   const b = writeBatch(db);
   b.set(doc(db, "settings", "app"), { sites, lots, shakenAlertDays: days, updatedAt: serverTimestamp() }, { merge: true });
-  // 駐車場の名前を変えたら、その名前の車の「置き場所」も書きかえる
-  const old = S.settings.lots || [];
-  const renames = new Map(old.map((o, i) => [o, lots[i]]).filter(([o, n]) => o && n && o !== n && !lots.includes(o)));
   if (renames.size) {
     S.vehicles.forEach(v => {
       const up = {};

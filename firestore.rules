@@ -100,7 +100,7 @@ service cloud.firestore {
     function validSettings(d) {
       return (!('people' in d) || (d.people is list && d.people.size() <= 200))
         && (!('sites' in d) || (d.sites is list && d.sites.size() <= 300))
-        && (!('lots' in d) || (d.lots is list && d.lots.size() >= 1 && d.lots.size() <= 10))
+        && (!('lots' in d) || (d.lots is list && d.lots.size() >= 1 && d.lots.size() <= 5))
         && (!('shakenAlertDays' in d) || (d.shakenAlertDays is int && d.shakenAlertDays >= 1 && d.shakenAlertDays <= 365));
     }
     match /settings/{docId} {
