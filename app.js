@@ -220,6 +220,7 @@ function renderPhone() {
     if (ui.tab === "cars") body = listCars();
     else if (ui.tab === "shaken") { title = "車検"; body = listShaken(); }
     else { title = "修理依頼"; body = listRepairs(); }
+    body = myBar() + body;
   } else if (sc.name === "done") {
     title = ""; body = doneScreen(sc);
   } else {
@@ -394,13 +395,36 @@ async function doReserve(v) {
   go({ name: "done", title: "予約しました", msg: `${fmt(from)}〜${fmt(to)}　${who}さん　${site}` });
 }
 
+/* ---------- 自分が使用中の車（返し忘れ防止の帯） ---------- */
+const dayLabel = s => { const d = parse(s); return `${d.getMonth() + 1}/${d.getDate()}（${DOW[d.getDay()]}）`; };
+// 自分の予約のうち、始まっていて返却していないもの（返却予定を過ぎたものも含む）
+function myUses() {
+  const t = ymd(today());
+  return S.reservations.filter(r => r.who === ME && !r.returnedAt && r.from <= t && byId(r.vehicleId) && !byId(r.vehicleId).retired)
+    .sort((a, b) => (a.to > b.to ? 1 : a.to < b.to ? -1 : 0));
+}
+function myBar() {
+  if (!ME || !S.ready) return "";
+  const uses = myUses(); if (!uses.length) return "";
+  const t = ymd(today());
+  const next = S.reservations.filter(r => r.who === ME && !r.returnedAt && r.from > t && byId(r.vehicleId) && !byId(r.vehicleId).retired)
+    .sort((a, b) => (a.from > b.from ? 1 : a.from < b.from ? -1 : 0))[0];
+  return `<div class="mybar">${uses.map(r => {
+    const v = byId(r.vehicleId), over = r.to < t;
+    return `<div class="myuse${over ? " over" : ""}">
+      <div class="mu-head">${over ? "⚠ 返却予定を過ぎています" : "あなたが使用中の車"}</div>
+      <div class="mu-body"><div class="mu-info"><b>${esc(v.kind)}</b><span class="mu-plate">${plateText(v)}</span><span class="mu-to">${dayLabel(r.to)}まで</span></div>
+        <button class="mu-btn" data-act="myReturn" data-id="${v.id}" data-val="${r.id}">返却する</button></div></div>`;
+  }).join("")}${next ? `<button class="mynext" data-act="detail" data-id="${next.vehicleId}">次の予約：${fmt(next.from)}〜 ${esc(byId(next.vehicleId).kind)}<span>›</span></button>` : ""}</div>`;
+}
+
 /* ---------- 返却 ---------- */
 function returnForm(v) {
   return `<div class="sheet-title">どこに止めましたか？</div><p class="sub">${esc(v.kind)}　${esc(v.plateKana)} ${esc(v.plateNum)}</p>
-  <div class="opts${(S.settings.lots || []).length > 3 ? " compact" : ""}">${(S.settings.lots || []).filter(Boolean).slice(0, LOT_MAX).map(l => `<button class="opt" data-act="return" data-id="${v.id}" data-val="${esc(l)}">${esc(l)}<span>›</span></button>`).join("")}</div>`;
+  <div class="opts${(S.settings.lots || []).length > 3 ? " compact" : ""}">${(S.settings.lots || []).filter(Boolean).slice(0, LOT_MAX).map(l => `<button class="opt" data-act="return" data-id="${v.id}" data-val="${esc(l)}" data-rid="${esc(ui.screen.rid || "")}">${esc(l)}<span>›</span></button>`).join("")}</div>`;
 }
-function doReturn(v, lot) {
-  const use = currentUse(v);
+function doReturn(v, lot, rid) {
+  const use = rid ? S.reservations.find(r => r.id === rid && !r.returnedAt) : currentUse(v);
   if (!use) { toast("この車はもう返却されています"); go({ name: "detail", id: v.id }); return; }
   // 押した瞬間に返却完了（電波が悪くても、つながったときに送られる）
   const b = writeBatch(db);
@@ -1085,7 +1109,8 @@ document.addEventListener("click", e => {
     case "whoMe": form.other = false; form.picking = false; form.who = ""; form.err = ""; render(); break;
     case "pickWho": form.who = val; form.picking = false; form.err = ""; render(); break;
     case "reserve": { const v = byId(id); if (v) doReserve(v); break; }
-    case "return": { const v = byId(id); if (v) doReturn(v, val); break; }
+    case "return": { const v = byId(id); if (v) doReturn(v, val, el.dataset.rid); break; }
+    case "myReturn": go({ name: "return", id, rid: val }); break;
     case "sym": toggleSym(val); break;
     case "rmPhoto": removeRepairPhoto(Number(val)); break;
     case "sendRepair": { const v = byId(id); if (v) doRepair(v); break; }

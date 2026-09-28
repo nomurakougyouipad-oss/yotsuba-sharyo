@@ -7,7 +7,7 @@
   --fix:#C8443A; --fix-bg:#F9E1DE;
   --plate:#F5F7F2; --plate-ink:#1B222B;
   /* 文字・枠線に使う色（ライトモードは上と同じ。ダークモードだけ明るくして背景に沈まないようにする） */
-  --steel-t:var(--steel); --steel-t-ink:#FFFFFF; --free-t:var(--free); --use-t:var(--use); --fix-t:var(--fix); --line-strong:var(--line);
+  --steel-t:var(--steel); --steel-t-ink:#FFFFFF; --use-deep:#8A4F00; --fix-deep:#9E2C24; --free-t:var(--free); --use-t:var(--use); --fix-t:var(--fix); --line-strong:var(--line);
   box-sizing:border-box;
   padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
 }
@@ -15,13 +15,13 @@
   :root:not([data-theme="light"]){
     --bg:#171A1E; --paper:#22262C; --ink:#EEF0EC; --mute:#A3ABB5; --line:#3A4048;
     --free-bg:#1E3A2A; --use-bg:#3E2E15; --fix-bg:#3F2220; --plate:#F5F7F2;
-    --steel-t:#A9CBEF; --steel-t-ink:#16202B; --free-t:#6BD197; --use-t:#F2AE55; --fix-t:#FF8F85; --line-strong:#6B7480;
+    --steel-t:#A9CBEF; --steel-t-ink:#16202B; --use-deep:#F2AE55; --fix-deep:#FF8F85; --free-t:#6BD197; --use-t:#F2AE55; --fix-t:#FF8F85; --line-strong:#6B7480;
   }
 }
 :root[data-theme="dark"]{
   --bg:#171A1E; --paper:#22262C; --ink:#EEF0EC; --mute:#A3ABB5; --line:#3A4048;
   --free-bg:#1E3A2A; --use-bg:#3E2E15; --fix-bg:#3F2220; --plate:#F5F7F2;
-  --steel-t:#A9CBEF; --steel-t-ink:#16202B; --free-t:#6BD197; --use-t:#F2AE55; --fix-t:#FF8F85; --line-strong:#6B7480;
+  --steel-t:#A9CBEF; --steel-t-ink:#16202B; --use-deep:#F2AE55; --fix-deep:#FF8F85; --free-t:#6BD197; --use-t:#F2AE55; --fix-t:#FF8F85; --line-strong:#6B7480;
 }
 html{scroll-padding-top:env(safe-area-inset-top,0px)}
 *{box-sizing:border-box}
@@ -367,3 +367,20 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
 .licwarn small{display:block;margin-top:4px;font-size:13px;font-weight:500;color:var(--ink);line-height:1.5}
 .ownnote{text-align:center;color:var(--mute);font-weight:700;margin:4px 0}
 .table td.kind .vtags{margin-top:3px}
+
+/* ---- スマホ：自分が使用中の車の帯（返し忘れ防止） ---- */
+.mybar{display:grid;gap:8px;margin:0 0 14px}
+.myuse{border-radius:14px;background:var(--use-bg);border:2px solid var(--use);padding:10px 12px;min-width:0}
+.myuse.over{background:var(--fix-bg);border-color:var(--fix)}
+.mu-head{font-size:13px;font-weight:900;color:var(--use-deep);margin-bottom:4px}
+.myuse.over .mu-head{color:var(--fix-deep)}
+.mu-body{display:flex;align-items:center;gap:10px;min-width:0}
+.mu-info{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.35}
+.mu-info b{font-size:17px;font-weight:900;overflow-wrap:anywhere}
+.mu-plate{font-size:13px;color:var(--mute);overflow-wrap:anywhere}
+.mu-to{font-size:15px;font-weight:700}
+.myuse.over .mu-to{color:var(--fix-deep)}
+.mu-btn{flex:none;min-height:48px;padding:0 16px;border:0;border-radius:12px;background:var(--steel-t);color:var(--steel-t-ink);font-size:16px;font-weight:900}
+.myuse.over .mu-btn{background:var(--fix);color:#fff}
+.mynext{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:40px;padding:6px 12px;border:1.5px solid var(--line-strong);border-radius:10px;background:var(--paper);color:var(--ink);font-size:14px;font-weight:700;text-align:left;overflow-wrap:anywhere}
+.mynext span{color:var(--mute);flex:none}
