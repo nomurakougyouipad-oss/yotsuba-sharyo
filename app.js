@@ -653,7 +653,7 @@ function openModal(id) {
   const v = id ? byId(id) : null;
   modalId = v ? v.id : null;
   const lots = [...S.settings.lots];
-  if (v && v.homeLot && !lots.includes(v.homeLot)) lots.push(v.homeLot);
+  [v && v.homeLot, v && v.currentLot].forEach(l => { if (l && !lots.includes(l)) lots.push(l); });
   const val = k => esc(v ? v[k] : "");
   $("modal").innerHTML = `<div class="overlay"><form class="modal panel" id="vform" novalidate>
     <h2>${v ? "車両を修正" : "車両を追加"}<button type="button" class="x" data-act="close" aria-label="閉じる">×</button></h2>
@@ -674,6 +674,9 @@ function openModal(id) {
         ${v ? `<div class="hint">車検を受けたら、新しい満了日に変えて保存してください</div>` : ""}</div>
       <div class="field"><label for="f-lot">通常の置き場所</label><select id="f-lot" name="homeLot">
         ${lots.map(l => `<option${(v ? v.homeLot === l : l === lots[0]) ? " selected" : ""}>${esc(l)}</option>`).join("")}</select></div>
+      ${v ? `<div class="field"><label for="f-curlot">今の置き場所</label><select id="f-curlot" name="currentLot">
+        ${lots.map(l => `<option${(v.currentLot || v.homeLot) === l ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>
+        <div class="hint">いま実際に止めてある駐車場です。使用中の車は、返却のときに選んだ駐車場で上書きされます</div></div>` : ""}
       <div class="field"><label>写真（任意）</label>
         <div class="photo-pick"><span id="f-prev">${v ? thumbHtml(v) : `<div class="thumb">${carSvg(CAR_COLORS[0])}</div>`}</span>
         <label class="photo-btn">📷 ${v && v.photoUrl ? "写真を変える" : "写真を選ぶ"}<input type="file" accept="image/*" hidden id="f-photo"></label></div></div>
@@ -854,6 +857,7 @@ function saveVehicle(form) {
   else if (!TYPES.includes(data.type)) err = "種類（トラック／バン／普通車）を選んでください";
   else if (!/^\d{4}-\d{2}-\d{2}$/.test(data.shakenDate)) err = "車検満了日を入れてください";
   else if (!data.homeLot) err = "通常の置き場所を選んでください";
+  else if (modalId && !g("currentLot")) err = "今の置き場所を選んでください";
   else {
     const key = x => [x.plateArea, x.plateClass, x.plateKana, x.plateNum].join(" ");
     const dup = S.vehicles.find(x => x.id !== modalId && key(x) === key(data));
@@ -864,7 +868,7 @@ function saveVehicle(form) {
   // 電波が悪くても画面はすぐ閉じる（Firestore が裏で送る）
   const ref = modalId ? doc(db, "vehicles", modalId) : doc(collection(db, "vehicles"));
   const p = modalId
-    ? updateDoc(ref, { ...data, updatedAt: serverTimestamp() })
+    ? updateDoc(ref, { ...data, currentLot: g("currentLot"), updatedAt: serverTimestamp() })
     : setDoc(ref, {
         ...data, currentLot: data.homeLot, photoUrl: null, status: "free", retired: false,
         createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
