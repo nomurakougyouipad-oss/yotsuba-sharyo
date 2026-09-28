@@ -704,11 +704,8 @@ function openModal(id) {
         `<label class="chip"><input type="radio" name="type" value="${t}"${v && v.type === t ? " checked" : ""}>${t}</label>`).join("")}</div></div>
       <div class="field"><label for="f-shaken">車検満了日</label><input id="f-shaken" type="date" name="shakenDate" value="${val("shakenDate")}">
         ${v ? `<div class="hint">車検を受けたら、新しい満了日に変えて保存してください</div>` : ""}</div>
-      <div class="field"><label for="f-lot">通常の置き場所</label><select id="f-lot" name="homeLot">
-        ${lots.map(l => `<option${(v ? v.homeLot === l : l === lots[0]) ? " selected" : ""}>${esc(l)}</option>`).join("")}</select></div>
-      ${v ? `<div class="field"><label for="f-curlot">今の置き場所</label><select id="f-curlot" name="currentLot">
-        ${lots.map(l => `<option${(v.currentLot || v.homeLot) === l ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>
-        <div class="hint">いま実際に止めてある駐車場です。使用中の車は、返却のときに選んだ駐車場で上書きされます</div></div>` : ""}
+      <div class="field"><label for="f-lot">置き場所</label><select id="f-lot" name="lot">
+        ${lots.map(l => `<option${(v ? lotOf(v) === l : l === lots[0]) ? " selected" : ""}>${esc(l)}</option>`).join("")}</select></div>
       <div class="field"><label>写真（任意）</label>
         <div class="photo-pick"><span id="f-prev">${v ? thumbHtml(v) : `<div class="thumb">${carSvg(CAR_COLORS[0])}</div>`}</span>
         <label class="photo-btn">📷 ${v && v.photoUrl ? "写真を変える" : "写真を選ぶ"}<input type="file" accept="image/*" hidden id="f-photo"></label></div></div>
@@ -890,7 +887,7 @@ function saveVehicle(form) {
   const g = k => String(f.get(k) || "").trim();
   const data = {
     plateArea: g("plateArea"), plateClass: toHalf(g("plateClass")).toUpperCase(), plateKana: g("plateKana"),
-    plateNum: toHalf(g("plateNum")), kind: g("kind"), type: g("type"), shakenDate: g("shakenDate"), homeLot: g("homeLot"),
+    plateNum: toHalf(g("plateNum")), kind: g("kind"), type: g("type"), shakenDate: g("shakenDate"), homeLot: g("lot"), currentLot: g("lot"), // 置き場所は1つ（通常・今の両方に同じ値）
   };
   let err = "";
   if (!data.plateArea || !data.plateClass || !data.plateKana || !data.plateNum) err = "ナンバーを4つとも入れてください";
@@ -898,8 +895,7 @@ function saveVehicle(form) {
   else if (!data.kind) err = "車種を入れてください";
   else if (!TYPES.includes(data.type)) err = "種類（トラック／バン／普通車）を選んでください";
   else if (!/^\d{4}-\d{2}-\d{2}$/.test(data.shakenDate)) err = "車検満了日を入れてください";
-  else if (!data.homeLot) err = "通常の置き場所を選んでください";
-  else if (modalId && !g("currentLot")) err = "今の置き場所を選んでください";
+  else if (!data.homeLot) err = "置き場所を選んでください";
   else {
     const key = x => [x.plateArea, x.plateClass, x.plateKana, x.plateNum].join(" ");
     const dup = S.vehicles.find(x => x.id !== modalId && key(x) === key(data));
@@ -910,9 +906,9 @@ function saveVehicle(form) {
   // 電波が悪くても画面はすぐ閉じる（Firestore が裏で送る）
   const ref = modalId ? doc(db, "vehicles", modalId) : doc(collection(db, "vehicles"));
   const p = modalId
-    ? updateDoc(ref, { ...data, currentLot: g("currentLot"), updatedAt: serverTimestamp() })
+    ? updateDoc(ref, { ...data, updatedAt: serverTimestamp() })
     : setDoc(ref, {
-        ...data, currentLot: data.homeLot, photoUrl: null, status: "free", retired: false,
+        ...data, photoUrl: null, status: "free", retired: false,
         createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
       });
   const file = pendingPhoto && pendingPhoto.file;
