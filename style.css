@@ -384,3 +384,13 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
 .myuse.over .mu-btn{background:var(--fix);color:#fff}
 .mynext{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:40px;padding:6px 12px;border:1.5px solid var(--line-strong);border-radius:10px;background:var(--paper);color:var(--ink);font-size:14px;font-weight:700;text-align:left;overflow-wrap:anywhere}
 .mynext span{color:var(--mute);flex:none}
+
+/* ---- 返却予定を過ぎた車（使用中・返却待ち） ---- */
+.band.use.over,.status-pill.use.over{background:var(--fix)}
+.tag.overdue{background:var(--fix);color:#fff;font-weight:900;white-space:nowrap}
+.table tr.grp td .tag.overdue{font-size:12px;margin-left:10px;opacity:1}
+.table tr.vrow.over td:first-child{border-left-color:var(--fix)}
+.table td .s{color:var(--mute)}
+.table td .s.overdue-s{color:var(--fix-deep);font-weight:700}
+/* 詳細の行の中の赤い文字（修理の内容・車検・返却予定を過ぎた日） */
+.row .v .warn{color:var(--fix-t)}

@@ -113,8 +113,12 @@ const active = () => S.vehicles.filter(v => !v.retired);
 const byId = id => S.vehicles.find(v => v.id === id);
 function currentUse(v) {
   const t = ymd(today());
-  return S.reservations.find(r => r.vehicleId === v.id && !r.returnedAt && r.from <= t && t <= r.to) || null;
+  // 返却予定を過ぎても返却していなければ使用中（返却待ち）。いちばん早く終わる予定のものを使う
+  return S.reservations.filter(r => r.vehicleId === v.id && !r.returnedAt && r.from <= t)
+    .sort((a, b) => (a.to > b.to ? 1 : a.to < b.to ? -1 : 0))[0] || null;
 }
+// 返却予定を過ぎて、まだ返却していない予約
+const isOverdue = r => !!r && !r.returnedAt && r.to < ymd(today());
 function fixRepair(v) { return S.repairs.find(r => r.vehicleId === v.id && r.status === "in_repair") || null; }
 function nextRes(v) {
   const t = ymd(today());
@@ -166,6 +170,7 @@ function shakenTag(v) {
 const byShaken = list => [...list].sort((a, b) => (a.shakenDate > b.shakenDate ? 1 : -1));
 function shakenText(v) { const d = daysTo(v.shakenDate); return d < 0 ? `${-d}日 超過` : (d === 0 ? "今日" : `あと ${d}日`); }
 function bandExtra(v, st, use) {
+  if (use && isOverdue(use)) return `<span class="period">返却予定を過ぎています</span>`;
   if (use) return `<span class="period">${fmt(use.from)}〜${fmt(use.to)}</span>`;
   const next = nextRes(v);
   if (st !== "fix" && next) return `<span class="period"><small>次の予約</small>${fmt(next.from)}〜</span>`;
@@ -272,7 +277,7 @@ function listCars() {
     const st = status(v), use = currentUse(v), fix = fixRepair(v);
     return `
   <button class="card" data-act="detail" data-id="${v.id}">
-    <div class="band ${st}"><span>${LABEL[st]}</span>${bandExtra(v, st, use)}</div>
+    <div class="band ${st}${st === "use" && isOverdue(use) ? " over" : ""}"><span>${st === "use" && isOverdue(use) ? "使用中（返却待ち）" : LABEL[st]}</span>${bandExtra(v, st, use)}</div>
     <div class="body">
       ${thumbHtml(v)}
       <div class="meta"><div class="r1">${plateHtml(v, true)}${shakenTag(v)}</div><div class="kind">${esc(v.kind)}</div>${vehicleTags(v)}<div class="who">${useText(v, use, fix)}</div></div>
@@ -284,10 +289,10 @@ function listCars() {
 function detail(v) {
   const st = status(v), use = currentUse(v), fix = fixRepair(v);
   const rows = [
-    ["状態", `<span class="status-pill ${st}">${LABEL[st]}</span>`],
+    ["状態", st === "use" && isOverdue(use) ? `<span class="status-pill use over">使用中（返却待ち）</span>` : `<span class="status-pill ${st}">${LABEL[st]}</span>`],
     use ? ["使っている人", esc(use.who) + "さん"] : null,
     use ? ["現場", esc(use.site)] : null,
-    use ? ["いつまで", `${fmt(use.to)} まで`] : null,
+    use ? ["いつまで", isOverdue(use) ? `<span class="warn">${fmt(use.to)} まで（返却予定を過ぎています）</span>` : `${fmt(use.to)} まで`] : null,
     !use ? ["置いてある場所", esc(lotOf(v))] : null,
     fix ? ["修理", `<span class="warn">${esc(repairText(fix))}</span>`] : null,
     ["車検", `<span class="${shakenClass(v) ? "warn" : ""}">${jp(v.shakenDate)}（${shakenText(v)}）</span>`],
@@ -309,8 +314,9 @@ function calendar(v) {
   const td = today(), y = td.getFullYear(), m = td.getMonth();
   const first = new Date(y, m, 1), last = new Date(y, m + 1, 0);
   const lo = ymd(first), hi = ymd(last), busy = new Set();
-  S.reservations.filter(r => r.vehicleId === v.id && !r.returnedAt && r.to >= lo && r.from <= hi).forEach(r => {
-    for (let d = parse(r.from > lo ? r.from : lo); ymd(d) <= r.to && ymd(d) <= hi; d.setDate(d.getDate() + 1)) busy.add(ymd(d));
+  S.reservations.filter(r => r.vehicleId === v.id && !r.returnedAt && (r.to >= lo || isOverdue(r)) && r.from <= hi).forEach(r => {
+    const end = isOverdue(r) ? ymd(today()) : r.to;
+    for (let d = parse(r.from > lo ? r.from : lo); ymd(d) <= end && ymd(d) <= hi; d.setDate(d.getDate() + 1)) busy.add(ymd(d));
   });
   let cells = [..."日月火水木金土"].map(d => `<div class="d dow">${d}</div>`).join("");
   for (let i = 0; i < first.getDay(); i++) cells += `<div class="d blank"></div>`;
@@ -327,8 +333,11 @@ function calendar(v) {
 const SITE_OTHER = "__other";
 const plateText = v => `${esc(v.plateArea)} ${esc(v.plateClass)} ${esc(v.plateKana)} ${esc(v.plateNum)}`;
 // 同じ車で日付が重なる予約（返却済みは除く）
-const findClash = (list, vid, from, to) => list.find(r => r.vehicleId === vid && !r.returnedAt && r.from <= to && from <= r.to) || null;
-const clashMsg = r => `その日は予約が入っています：${fmt(r.from)}〜${fmt(r.to)} ${r.who}さん（${r.site}）`;
+const effTo = r => (!r.returnedAt && r.to < ymd(today()) ? "9999-12-31" : r.to);
+const findClash = (list, vid, from, to) => list.find(r => r.vehicleId === vid && !r.returnedAt && r.from <= to && from <= effTo(r)) || null;
+const clashMsg = r => (effTo(r) !== r.to
+  ? `この車は返却予定（${fmt(r.to)}）を過ぎて、まだ返却されていません（${r.who}さん）。返却されるまで予約できません`
+  : `その日は予約が入っています：${fmt(r.from)}〜${fmt(r.to)} ${r.who}さん（${r.site}）`);
 class ClashError extends Error {}
 
 function reserveForm(v) {
@@ -576,12 +585,12 @@ function renderPc() {
       ${["use", "free", "fix"].map(g => {
         const rows = list.filter(v => status(v) === g); if (!rows.length) return "";
         const open = !!pcUi.groups[g];
-        return `<tr class="grp ${g}${open ? "" : " closed"}" data-act="pcGroup" data-val="${g}" tabindex="0" role="button" aria-expanded="${open}" title="押すと${open ? "閉じます" : "開きます"}"><td colspan="8"><span class="caret">${open ? "▼" : "▶"}</span>${LABEL[g]}<span>${rows.length}台</span></td></tr>` + (!open ? "" : rows.map(v => {
-          const use = currentUse(v);
-          return `<tr class="vrow ${g}" data-act="edit" data-id="${v.id}" title="押すと修正できます">
-        <td class="st"><span class="dot ${g}"></span>${LABEL[g]}</td>
+        return `<tr class="grp ${g}${open ? "" : " closed"}" data-act="pcGroup" data-val="${g}" tabindex="0" role="button" aria-expanded="${open}" title="押すと${open ? "閉じます" : "開きます"}"><td colspan="8"><span class="caret">${open ? "▼" : "▶"}</span>${LABEL[g]}<span>${rows.length}台</span>${g === "use" && rows.some(v => isOverdue(currentUse(v))) ? `<span class="tag overdue">うち返却待ち ${rows.filter(v => isOverdue(currentUse(v))).length}台</span>` : ""}</td></tr>` + (!open ? "" : rows.map(v => {
+          const use = currentUse(v), over = isOverdue(use);
+          return `<tr class="vrow ${g}${over ? " over" : ""}" data-act="edit" data-id="${v.id}" title="押すと修正できます">
+        <td class="st"><span class="dot ${g}"></span>${LABEL[g]}${over ? '<div><span class="tag overdue">返却待ち</span></div>' : ""}</td>
         <td>${thumbHtml(v)}</td><td>${plateHtml(v, true)}</td><td class="kind">${esc(v.kind)}${vehicleTags(v)}</td>
-        <td>${use ? esc(use.who) : "—"}</td><td>${use ? `${esc(use.site)}<div class="s" style="color:var(--mute);font-size:12px">${fmt(use.from)}〜${fmt(use.to)}</div>` : "—"}</td>
+        <td>${use ? esc(use.who) : "—"}</td><td>${use ? `${esc(use.site)}<div class="s${over ? " overdue-s" : ""}" style="font-size:12px">${fmt(use.from)}〜${fmt(use.to)}${over ? "（返却予定を過ぎています）" : ""}</div>` : "—"}</td>
         <td>${use ? "—" : esc(lotOf(v))}</td><td><span class="days ${shakenClass(v)}" style="font-size:13px">${shakenText(v)}</span></td></tr>`;
         }).join(""));
       }).join("")}
