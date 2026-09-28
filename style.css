@@ -333,3 +333,9 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
   :root{padding:0;background:linear-gradient(var(--steel) 50%,var(--paper) 50%)}
   body{background:transparent}
 }
+
+/* スマホ：画面の端でページ全体が引っぱられて、下のタブまで一緒に動かないように（一覧のスクロールはそのまま） */
+@media (max-width:899px){
+  html,body{overscroll-behavior:none}
+  .screen{overscroll-behavior-y:contain}
+}
