@@ -155,9 +155,14 @@ function carColor(v) { let h = 0; for (const c of v.id) h = (h * 31 + c.charCode
 function carSvg(color) {
   return `<svg viewBox="0 0 120 56" xmlns="http://www.w3.org/2000/svg"><path d="M14 40h92a4 4 0 0 0 4-4v-9c0-3-2-5-5-6l-14-3-12-11a6 6 0 0 0-4-2H38a6 6 0 0 0-5 3l-8 11-11 3c-3 1-5 3-5 6v8a4 4 0 0 0 4 4z" fill="${color}" stroke="#39424d" stroke-width="2.5" stroke-linejoin="round"/><path d="M42 12h28l9 10H35z" fill="#b8d8ee" stroke="#39424d" stroke-width="2"/><circle cx="34" cy="42" r="8" fill="#2a2f36"/><circle cx="34" cy="42" r="3.5" fill="#9aa4ae"/><circle cx="90" cy="42" r="8" fill="#2a2f36"/><circle cx="90" cy="42" r="3.5" fill="#9aa4ae"/></svg>`;
 }
-function thumbHtml(v, big) {
+// big：大きい写真を使う（詳細）。zoom：押すと画面いっぱいに開く
+function thumbHtml(v, big, zoom) {
   const url = big ? v.photoUrl : (v.thumbUrl || v.photoUrl);
-  return `<div class="thumb" aria-hidden="true">${url ? `<img src="${esc(url)}" alt="" decoding="async"${big ? "" : ' loading="lazy"'}>` : carSvg(carColor(v))}</div>`;
+  if (!url) return `<div class="thumb" aria-hidden="true">${carSvg(carColor(v))}</div>`;
+  const img = `<img src="${esc(url)}" alt="" decoding="async"${big ? "" : ' loading="lazy"'}>`;
+  return zoom && v.photoUrl
+    ? `<div class="thumb has-photo zoomable" data-act="viewPhoto" data-val="${esc(v.photoUrl)}" role="button" tabindex="0" aria-label="写真を大きく見る">${img}</div>`
+    : `<div class="thumb has-photo" aria-hidden="true">${img}</div>`;
 }
 function plateHtml(v, small) {
   return `<span class="plate"${small ? ' style="font-size:15px"' : ""}><small>${esc(v.plateArea)} ${esc(v.plateClass)}</small>${esc(v.plateKana)} ${esc(v.plateNum)}</span>`;
@@ -303,7 +308,7 @@ function detail(v) {
     ? `<button class="btn primary" data-act="goto" data-val="return" data-id="${v.id}">返却する</button>`
     : (st === "free" ? (canReserve(v) ? `<button class="btn primary" data-act="goto" data-val="reserve" data-id="${v.id}">この車を予約する</button>`
       : `<p class="ownnote">この車は${esc(v.owner)}さん専用です</p>`) : "");
-  return `<div class="hero">${thumbHtml(v, true)}${plateHtml(v)}${vehicleTags(v)}${photoBtn(v)}</div>
+  return `<div class="hero">${thumbHtml(v, true, true)}${plateHtml(v)}${vehicleTags(v)}${photoBtn(v)}</div>
   <div class="rows">${rows.map(([k, val]) => `<div class="row"><span class="k">${k}</span><span class="v">${val}</span></div>`).join("")}</div>
   <div class="actions">${actions}<button class="btn ghost" data-act="goto" data-val="repair" data-id="${v.id}">修理を頼む</button></div>
   ${calendar(v)}`;
@@ -589,7 +594,7 @@ function renderPc() {
           const use = currentUse(v), over = isOverdue(use);
           return `<tr class="vrow ${g}${over ? " over" : ""}" data-act="edit" data-id="${v.id}" title="押すと修正できます">
         <td class="st"><span class="dot ${g}"></span>${LABEL[g]}${over ? '<div><span class="tag overdue">返却待ち</span></div>' : ""}</td>
-        <td>${thumbHtml(v)}</td><td>${plateHtml(v, true)}</td><td class="kind">${esc(v.kind)}${vehicleTags(v)}</td>
+        <td>${thumbHtml(v, false, true)}</td><td>${plateHtml(v, true)}</td><td class="kind">${esc(v.kind)}${vehicleTags(v)}</td>
         <td>${use ? esc(use.who) : "—"}</td><td>${use ? `${esc(use.site)}<div class="s${over ? " overdue-s" : ""}" style="font-size:12px">${fmt(use.from)}〜${fmt(use.to)}${over ? "（返却予定を過ぎています）" : ""}</div>` : "—"}</td>
         <td>${use ? "—" : esc(lotOf(v))}</td><td><span class="days ${shakenClass(v)}" style="font-size:13px">${shakenText(v)}</span></td></tr>`;
         }).join(""));
@@ -1148,6 +1153,70 @@ async function pickFormPhoto(input) {
   }
 }
 
+/* ---------- 写真を見る画面（画面いっぱい。2本指で拡大・縮小、拡大中は1本指で動かす、2回タップで拡大／戻す） ---------- */
+let viewer = null;
+function openViewer(url) {
+  closeViewer();
+  const el = document.createElement("div");
+  el.className = "viewer"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "写真");
+  el.innerHTML = `<img src="${esc(url)}" alt="車の写真" draggable="false"><button type="button" class="vclose" aria-label="閉じる">×</button>`;
+  document.body.appendChild(el);
+  const img = el.querySelector("img");
+  const st = { scale: 1, x: 0, y: 0 }, pts = new Map();
+  let start = null, moved = false, lastTap = 0, onImg = false;
+  const apply = () => { img.style.transform = `translate(${st.x}px,${st.y}px) scale(${st.scale})`; };
+  const clamp = v => Math.min(5, Math.max(1, v));
+  const reset = () => { st.scale = 1; st.x = 0; st.y = 0; apply(); };
+  const zoomAt = (ns, cx, cy) => { // 指（マウス）の位置を中心に拡大・縮小
+    const r = el.getBoundingClientRect(), ox = cx - r.width / 2, oy = cy - r.height / 2;
+    ns = clamp(ns); const k = ns / st.scale;
+    st.x = ox - (ox - st.x) * k; st.y = oy - (oy - st.y) * k; st.scale = ns;
+    if (ns === 1) { st.x = 0; st.y = 0; }
+    apply();
+  };
+  el.addEventListener("pointerdown", e => {
+    if (e.target.closest(".vclose")) return;
+    if (!pts.size) onImg = e.target === img;
+    try { el.setPointerCapture(e.pointerId); } catch (err) { /* 押さえ続けの登録ができなくても動く */ }
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); moved = false;
+    const p = [...pts.values()];
+    start = p.length >= 2
+      ? { d: Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y), scale: st.scale }
+      : { px: e.clientX, py: e.clientY, x: st.x, y: st.y };
+  });
+  el.addEventListener("pointermove", e => {
+    if (!pts.has(e.pointerId)) return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const p = [...pts.values()];
+    if (p.length >= 2 && start && start.d) {
+      const d = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
+      zoomAt(start.scale * d / start.d, (p[0].x + p[1].x) / 2, (p[0].y + p[1].y) / 2); moved = true;
+    } else if (p.length === 1 && start && start.px != null && st.scale > 1) {
+      st.x = start.x + e.clientX - start.px; st.y = start.y + e.clientY - start.py; apply();
+      if (Math.abs(e.clientX - start.px) + Math.abs(e.clientY - start.py) > 6) moved = true;
+    } else if (start && start.px != null && Math.abs(e.clientX - start.px) + Math.abs(e.clientY - start.py) > 6) moved = true;
+  });
+  const up = e => {
+    pts.delete(e.pointerId);
+    const p = [...pts.values()];
+    start = p.length === 1 ? { px: p[0].x, py: p[0].y, x: st.x, y: st.y } : null;
+    if (pts.size) return;
+    if (moved) return;
+    // 1本指で押しただけ：2回続けてなら拡大／戻す、背景なら閉じる
+    const now = Date.now();
+    if (onImg && now - lastTap < 320) { st.scale > 1 ? reset() : zoomAt(2.5, e.clientX, e.clientY); lastTap = 0; return; }
+    lastTap = now;
+    if (!onImg) closeViewer();
+  };
+  el.addEventListener("pointerup", up);
+  el.addEventListener("pointercancel", e => { pts.delete(e.pointerId); start = null; });
+  el.addEventListener("wheel", e => { e.preventDefault(); zoomAt(st.scale * (e.deltaY < 0 ? 1.2 : 1 / 1.2), e.clientX, e.clientY); }, { passive: false });
+  el.querySelector(".vclose").addEventListener("click", closeViewer);
+  viewer = el;
+  el.querySelector(".vclose").focus();
+}
+function closeViewer() { if (viewer) { viewer.remove(); viewer = null; } }
+
 /* ---------- お知らせ ---------- */
 let toastTimer;
 function toast(msg, kind) {
@@ -1187,6 +1256,7 @@ document.addEventListener("click", e => {
     case "add": openModal(null); break;
     case "edit": openModal(id); break;
     case "close": closeModal(); break;
+    case "viewPhoto": openViewer(val); break;
     case "settings": openSettings(); break;
     case "memImport": importFromNippo(); break;
     case "memToggle": toggleMember(id); break;
@@ -1244,7 +1314,10 @@ document.addEventListener("keydown", e => {
   if (e.key === "Enter" && e.target.matches && e.target.matches(".li.tap")) e.target.click();
   if ((e.key === "Enter" || e.key === " ") && e.target.matches && e.target.matches("tr.grp[data-act]")) { e.preventDefault(); e.target.click(); }
 });
-document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("modal").hidden) closeModal(); });
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") { if (viewer) closeViewer(); else if (!$("modal").hidden) closeModal(); }
+  if (e.key === "Enter" && e.target.matches && e.target.matches(".thumb.zoomable")) e.target.click();
+});
 document.addEventListener("toggle", e => {
   if (!e.target.matches) return;
   if (e.target.matches("details.hiddenv")) ui.hiddenOpen = e.target.open;
