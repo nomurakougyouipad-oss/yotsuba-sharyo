@@ -35,7 +35,7 @@ const storage = getStorage(fbApp);
 
 /* ---------- 定数 ---------- */
 const TYPES = ["トラック", "バン", "普通車"];
-const LABEL = { free: "空き", use: "使用中", fix: "修理中" };
+const LABEL = { free: "空き", use: "使用中", fix: "修理中", own: "専用" };
 const DEFAULT_SETTINGS = {
   people: ["野村", "田中", "佐藤", "山本", "鈴木", "高橋"],
   sites: ["東レ 定修", "太陽石油", "黒藤川発電所", "熊本 浄化センター", "松前工場 内作"],
@@ -148,6 +148,19 @@ function vehicleTags(v) {
   const t = (v.owner ? `<span class="vtag own">${esc(v.owner)}さん専用</span>` : "")
     + (l !== "普通" ? `<span class="vtag lic" title="${esc(l)}：${esc(LICENSE_NOTE[l])}">${l}</span>` : "");
   return t ? `<div class="vtags">${t}</div>` : "";
+}
+
+// 専用の車が使われていない（空き）
+const isOwnFree = v => !!v.owner && status(v) === "free";
+// PC の区分：使用中・空き・専用・修理中（専用の空きは「空き」に入れない）
+const groupOf = v => (isOwnFree(v) ? "own" : status(v));
+// スマホの「空き」に入れるか：専用の車は本人だけ
+const freeForMe = v => status(v) === "free" && (!v.owner || v.owner === ME);
+// スマホの色帯・詳細の状態の見え方
+function statusView(v, st, use) {
+  if (st === "use" && isOverdue(use)) return { cls: "use over", label: "使用中（返却待ち）" };
+  if (isOwnFree(v)) return v.owner === ME ? { cls: "free", label: "あなた専用（空き）" } : { cls: "own", label: `${v.owner}さん専用` };
+  return { cls: st, label: LABEL[st] };
 }
 
 /* ---------- 部品（試作と同じ見た目） ---------- */
@@ -271,9 +284,10 @@ function listCars() {
   const all = shown();
   if (!all.length) return `<div class="empty">まだ車が登録されていません。<br>事務所のPCから登録してください</div>`;
   const byType = all.filter(v => ui.tfilter === "all" || v.type === ui.tfilter);
-  const n = k => byType.filter(v => k === "all" || status(v) === k).length;
-  const nt = t => all.filter(v => (t === "all" || v.type === t) && (ui.filter === "all" || status(v) === ui.filter)).length;
-  const list = byType.filter(v => ui.filter === "all" || status(v) === ui.filter);
+  const match = (v, k) => k === "all" || (k === "free" ? freeForMe(v) : status(v) === k);
+  const n = k => byType.filter(v => match(v, k)).length;
+  const nt = t => all.filter(v => (t === "all" || v.type === t) && match(v, ui.filter)).length;
+  const list = byType.filter(v => match(v, ui.filter));
   return `<div class="chips">
     ${[["all", "全部"], ["free", "空き"], ["use", "使用中"]].map(([k, l]) => `<button class="chip ${ui.filter === k ? "on" : ""}" data-act="filter" data-val="${k}">${l}<span class="n">${n(k)}</span></button>`).join("")}
   </div><div class="chips types">
@@ -282,7 +296,7 @@ function listCars() {
     const st = status(v), use = currentUse(v), fix = fixRepair(v);
     return `
   <button class="card" data-act="detail" data-id="${v.id}">
-    <div class="band ${st}${st === "use" && isOverdue(use) ? " over" : ""}"><span>${st === "use" && isOverdue(use) ? "使用中（返却待ち）" : LABEL[st]}</span>${bandExtra(v, st, use)}</div>
+    <div class="band ${statusView(v, st, use).cls}"><span>${esc(statusView(v, st, use).label)}</span>${bandExtra(v, st, use)}</div>
     <div class="body">
       ${thumbHtml(v)}
       <div class="meta"><div class="r1">${plateHtml(v, true)}${shakenTag(v)}</div><div class="kind">${esc(v.kind)}</div>${vehicleTags(v)}<div class="who">${useText(v, use, fix)}</div></div>
@@ -294,7 +308,7 @@ function listCars() {
 function detail(v) {
   const st = status(v), use = currentUse(v), fix = fixRepair(v);
   const rows = [
-    ["状態", st === "use" && isOverdue(use) ? `<span class="status-pill use over">使用中（返却待ち）</span>` : `<span class="status-pill ${st}">${LABEL[st]}</span>`],
+    ["状態", `<span class="status-pill ${statusView(v, st, use).cls}">${esc(statusView(v, st, use).label)}</span>`],
     use ? ["使っている人", esc(use.who) + "さん"] : null,
     use ? ["現場", esc(use.site)] : null,
     use ? ["いつまで", isOverdue(use) ? `<span class="warn">${fmt(use.to)} まで（返却予定を過ぎています）</span>` : `${fmt(use.to)} まで`] : null,
@@ -549,7 +563,7 @@ function doneScreen(sc) {
 /* ================= PC版ダッシュボード ================= */
 /* ---------- PC の表示の状態（絞り込み・グループの開閉・パネルの開閉。開き直しても覚えておく） ---------- */
 const pcUi = (() => {
-  const def = { filter: "all", type: "all", groups: { use: true, free: false, fix: true }, panels: { shaken: false, repair: false, future: false } };
+  const def = { filter: "all", type: "all", groups: { use: true, free: false, own: false, fix: true }, panels: { shaken: false, repair: false, future: false } };
   let p = {}; try { p = JSON.parse(lsGet("sharyo_pc_ui") || "{}") || {}; } catch (e) { p = {}; }
   return { filter: p.filter || def.filter, type: p.type || def.type, groups: { ...def.groups, ...(p.groups || {}) }, panels: { ...def.panels, ...(p.panels || {}) } };
 })();
@@ -567,7 +581,7 @@ function foldList(key, items, unit) {
 
 function renderPc() {
   const vs = shown(), d = today();
-  const n = k => vs.filter(v => status(v) === k).length;
+  const n = k => vs.filter(v => groupOf(v) === k).length;
   const retired = S.vehicles.filter(v => v.retired);
   const hiddenV = active().filter(v => v.hidden);
   const hasSample = S.vehicles.some(v => v.sample);
@@ -578,17 +592,17 @@ function renderPc() {
     !S.vehicles.length ? `<div style="margin-top:12px"><button class="btn ghost small" data-act="seed">サンプルデータ（8台）を入れて試す</button></div>` : ""}</div>`;
   else {
     const typeOK = v => pcUi.type === "all" || v.type === pcUi.type;
-    const stOK = v => pcUi.filter === "all" || status(v) === pcUi.filter;
+    const stOK = v => pcUi.filter === "all" || groupOf(v) === pcUi.filter;
     const byType = vs.filter(typeOK), list = byType.filter(stOK);
-    const n1 = k => byType.filter(v => k === "all" || status(v) === k).length;
+    const n1 = k => byType.filter(v => k === "all" || groupOf(v) === k).length;
     const n2 = t => vs.filter(v => (t === "all" || v.type === t) && stOK(v)).length;
     const tabs = `<div class="pcfilter"><div class="chips four">${PC_FILTERS.map(([k, l]) =>
       `<button class="chip ${pcUi.filter === k ? "on" : ""}" data-act="pcFilter" data-val="${k}">${l}<span class="n">${n1(k)}</span></button>`).join("")}</div>
       <div class="chips types four">${[["all", "全種類"], ...TYPES.map(t => [t, t])].map(([k, l]) =>
       `<button class="chip ${pcUi.type === k ? "on" : ""}" data-act="pcType" data-val="${k}">${l}<span class="n">${n2(k)}</span></button>`).join("")}</div></div>`;
     table = tabs + (!list.length ? `<div class="empty">この条件の車はありません</div>` : `<table class="table"><thead><tr><th>状態</th><th>写真</th><th>ナンバー</th><th>車種</th><th>使っている人</th><th>現場</th><th>置き場所</th><th>車検</th></tr></thead><tbody>
-      ${["use", "free", "fix"].map(g => {
-        const rows = list.filter(v => status(v) === g); if (!rows.length) return "";
+      ${["use", "free", "own", "fix"].map(g => {
+        const rows = list.filter(v => groupOf(v) === g); if (!rows.length) return "";
         const open = !!pcUi.groups[g];
         return `<tr class="grp ${g}${open ? "" : " closed"}" data-act="pcGroup" data-val="${g}" tabindex="0" role="button" aria-expanded="${open}" title="押すと${open ? "閉じます" : "開きます"}"><td colspan="8"><span class="caret">${open ? "▼" : "▶"}</span>${LABEL[g]}<span>${rows.length}台</span>${g === "use" && rows.some(v => isOverdue(currentUse(v))) ? `<span class="tag overdue">うち返却待ち ${rows.filter(v => isOverdue(currentUse(v))).length}台</span>` : ""}</td></tr>` + (!open ? "" : rows.map(v => {
           const use = currentUse(v), over = isOverdue(use);

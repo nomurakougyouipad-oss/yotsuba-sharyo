@@ -420,3 +420,11 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
 .mhero-img.zoomable{cursor:zoom-in}
 .mhero-img.zoomable:focus-visible{outline:3px solid var(--steel-t);outline-offset:2px}
 .mhero #f-prev{width:100%;display:flex;justify-content:center}
+
+/* ---- 専用の車（使っていないとき）：グレー ---- */
+:root{--own:#6B7480}
+.band.own,.status-pill.own{background:var(--own)}
+.dot.own{background:var(--own)}
+.table tr.grp.own td{color:var(--mute);border-left-color:var(--own)}
+.table tr.vrow.own td:first-child{border-left-color:var(--own)}
+.table tr.vrow.own td{background:color-mix(in srgb,var(--own) 4%,var(--paper))}
