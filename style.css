@@ -428,3 +428,8 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
 .table tr.grp.own td{color:var(--mute);border-left-color:var(--own)}
 .table tr.vrow.own td:first-child{border-left-color:var(--own)}
 .table tr.vrow.own td{background:color-mix(in srgb,var(--own) 4%,var(--paper))}
+
+/* ---- 絞り込みの「専用」タブ：上の段を4つ（PCは5つ）に。本人の専用車は紺の「あなた専用」 ---- */
+.chips.five{grid-template-columns:repeat(5,minmax(0,1fr))}
+#ph-screen .chips.four:not(.types) .chip{font-size:clamp(13px,4vw,16px);padding:4px 3px}
+.band.mine,.status-pill.mine{background:var(--steel)}

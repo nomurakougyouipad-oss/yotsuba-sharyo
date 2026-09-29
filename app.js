@@ -155,11 +155,13 @@ const isOwnFree = v => !!v.owner && status(v) === "free";
 // PC の区分：使用中・空き・専用・修理中（専用の空きは「空き」に入れない）
 const groupOf = v => (isOwnFree(v) ? "own" : status(v));
 // スマホの「空き」に入れるか：専用の車は本人だけ
-const freeForMe = v => status(v) === "free" && (!v.owner || v.owner === ME);
+const freeForMe = v => status(v) === "free" && !v.owner;
+// 絞り込み（スマホ・PC 共通）：専用は、専用の車すべて（使用中も含む）
+const matchFilter = (v, k) => k === "all" || (k === "free" ? freeForMe(v) : k === "own" ? !!v.owner : status(v) === k);
 // スマホの色帯・詳細の状態の見え方
 function statusView(v, st, use) {
   if (st === "use" && isOverdue(use)) return { cls: "use over", label: "使用中（返却待ち）" };
-  if (isOwnFree(v)) return v.owner === ME ? { cls: "free", label: "あなた専用（空き）" } : { cls: "own", label: `${v.owner}さん専用` };
+  if (isOwnFree(v)) return v.owner === ME ? { cls: "mine", label: "あなた専用" } : { cls: "own", label: `${v.owner}さん専用` };
   return { cls: st, label: LABEL[st] };
 }
 
@@ -284,12 +286,12 @@ function listCars() {
   const all = shown();
   if (!all.length) return `<div class="empty">まだ車が登録されていません。<br>事務所のPCから登録してください</div>`;
   const byType = all.filter(v => ui.tfilter === "all" || v.type === ui.tfilter);
-  const match = (v, k) => k === "all" || (k === "free" ? freeForMe(v) : status(v) === k);
+  const match = matchFilter;
   const n = k => byType.filter(v => match(v, k)).length;
   const nt = t => all.filter(v => (t === "all" || v.type === t) && match(v, ui.filter)).length;
   const list = byType.filter(v => match(v, ui.filter));
-  return `<div class="chips">
-    ${[["all", "全部"], ["free", "空き"], ["use", "使用中"]].map(([k, l]) => `<button class="chip ${ui.filter === k ? "on" : ""}" data-act="filter" data-val="${k}">${l}<span class="n">${n(k)}</span></button>`).join("")}
+  return `<div class="chips four">
+    ${[["all", "全部"], ["free", "空き"], ["use", "使用中"], ["own", "専用"]].map(([k, l]) => `<button class="chip ${ui.filter === k ? "on" : ""}" data-act="filter" data-val="${k}">${l}<span class="n">${n(k)}</span></button>`).join("")}
   </div><div class="chips types">
     ${[["all", "全種類"], ...TYPES.map(t => [t, t])].map(([k, l]) => `<button class="chip ${ui.tfilter === k ? "on" : ""}" data-act="tfilter" data-val="${k}">${l}<span class="n">${nt(k)}</span></button>`).join("")}
   </div>` + (list.length ? "" : `<div class="empty">この条件の車はありません</div>`) + list.map(v => {
@@ -568,7 +570,7 @@ const pcUi = (() => {
   return { filter: p.filter || def.filter, type: p.type || def.type, groups: { ...def.groups, ...(p.groups || {}) }, panels: { ...def.panels, ...(p.panels || {}) } };
 })();
 const savePcUi = () => lsSet("sharyo_pc_ui", JSON.stringify(pcUi));
-const PC_FILTERS = [["all", "全部"], ["free", "空き"], ["use", "使用中"], ["fix", "修理中"]];
+const PC_FILTERS = [["all", "全部"], ["free", "空き"], ["use", "使用中"], ["fix", "修理中"], ["own", "専用"]];
 const PANEL_LIMIT = 3;
 // パネルの中身を3件まで出し、残りは「＋ ほか○台を表示」で開く
 function foldList(key, items, unit) {
@@ -592,11 +594,11 @@ function renderPc() {
     !S.vehicles.length ? `<div style="margin-top:12px"><button class="btn ghost small" data-act="seed">サンプルデータ（8台）を入れて試す</button></div>` : ""}</div>`;
   else {
     const typeOK = v => pcUi.type === "all" || v.type === pcUi.type;
-    const stOK = v => pcUi.filter === "all" || groupOf(v) === pcUi.filter;
+    const stOK = v => pcUi.filter === "fix" ? status(v) === "fix" : matchFilter(v, pcUi.filter);
     const byType = vs.filter(typeOK), list = byType.filter(stOK);
-    const n1 = k => byType.filter(v => k === "all" || groupOf(v) === k).length;
+    const n1 = k => byType.filter(v => k === "fix" ? status(v) === "fix" : matchFilter(v, k)).length;
     const n2 = t => vs.filter(v => (t === "all" || v.type === t) && stOK(v)).length;
-    const tabs = `<div class="pcfilter"><div class="chips four">${PC_FILTERS.map(([k, l]) =>
+    const tabs = `<div class="pcfilter"><div class="chips five">${PC_FILTERS.map(([k, l]) =>
       `<button class="chip ${pcUi.filter === k ? "on" : ""}" data-act="pcFilter" data-val="${k}">${l}<span class="n">${n1(k)}</span></button>`).join("")}</div>
       <div class="chips types four">${[["all", "全種類"], ...TYPES.map(t => [t, t])].map(([k, l]) =>
       `<button class="chip ${pcUi.type === k ? "on" : ""}" data-act="pcType" data-val="${k}">${l}<span class="n">${n2(k)}</span></button>`).join("")}</div></div>`;
