@@ -172,9 +172,13 @@ function carSvg(color) {
 }
 // big：大きい写真を使う（詳細）。zoom：押すと画面いっぱいに開く
 function thumbHtml(v, big, zoom) {
-  const url = big ? v.photoUrl : (v.thumbUrl || v.photoUrl);
-  if (!url) return `<div class="thumb" aria-hidden="true">${carSvg(carColor(v))}</div>`;
-  const img = `<img src="${esc(url)}" alt="" decoding="async"${big ? "" : ' loading="lazy"'}>`;
+  const small = v.thumbUrl || v.photoUrl;
+  if (!small) return `<div class="thumb" aria-hidden="true">${carSvg(carColor(v))}</div>`;
+  // 大きい写真：まず一覧用の小さい写真をすぐ出し、大きい写真が届いたら差し替える
+  // 小さい写真（一覧・表）：画面に入る少し手前から読み込む
+  const img = big
+    ? `<img src="${esc(small)}"${v.photoUrl && v.photoUrl !== small ? ` data-full="${esc(v.photoUrl)}"` : ""} alt="" decoding="async">`
+    : `<img data-src="${esc(small)}" alt="" decoding="async">`;
   return zoom && v.photoUrl
     ? `<div class="thumb has-photo zoomable" data-act="viewPhoto" data-val="${esc(v.photoUrl)}" role="button" tabindex="0" aria-label="写真を大きく見る">${img}</div>`
     : `<div class="thumb has-photo" aria-hidden="true">${img}</div>`;
@@ -215,7 +219,34 @@ function applyView() {
 function go(s) { ui.screen = s; form.err = ""; render(); $("ph-screen").scrollTop = 0; }
 function setTab(t) { ui.tab = t; go({ name: "list" }); }
 
-function render() { if (ui.view === "phone") renderPhone(); else renderPc(); }
+function render() { if (ui.view === "phone") renderPhone(); else renderPc(); loadImages(); }
+
+/* ---------- 写真の読み込み（一覧は画面に入る少し手前から、詳細は小さい写真→大きい写真） ---------- */
+const LAZY_MARGIN = "600px 0px";
+const lazyObservers = new Map();
+function lazyObserver(root) {
+  if (!lazyObservers.has(root)) {
+    const obs = new IntersectionObserver(entries => entries.forEach(e => {
+      if (!e.isIntersecting) return;
+      const img = e.target; obs.unobserve(img);
+      if (img.dataset.src) { img.src = img.dataset.src; img.removeAttribute("data-src"); }
+    }), { root, rootMargin: LAZY_MARGIN });
+    lazyObservers.set(root, obs);
+  }
+  return lazyObservers.get(root);
+}
+function loadImages(scope = document) {
+  scope.querySelectorAll("img[data-src]").forEach(img => {
+    if (!("IntersectionObserver" in window)) { img.src = img.dataset.src; img.removeAttribute("data-src"); return; }
+    lazyObserver(img.closest("#ph-screen") || null).observe(img); // スマホは一覧の枠、PC は画面全体を基準に
+  });
+  scope.querySelectorAll("img[data-full]").forEach(img => {
+    const full = img.dataset.full; img.removeAttribute("data-full");
+    const pre = new Image(); pre.decoding = "async";
+    pre.onload = () => { if (img.isConnected) img.src = full; };
+    pre.src = full;
+  });
+}
 // データが届いたときの描き直し。スマホで入力中なら、キーボードが閉じないよう後回しにする
 function refresh() {
   const a = document.activeElement;
@@ -850,12 +881,14 @@ function openModal(id) {
     </div>
   </form></div>`;
   $("modal").hidden = false;
+  loadImages($("modal"));
   $("vform").plateArea.focus();
 }
 // フォームの上の大きい写真。url があれば押すと画面いっぱいに開く。なければ車のイラスト
 function formPhotoHtml(url, v) {
+  const first = v && v.thumbUrl && url === v.photoUrl ? v.thumbUrl : url; // 小さい写真をすぐ出して、大きい写真に差し替える
   return url
-    ? `<div class="mhero-img zoomable" data-act="viewPhoto" data-val="${esc(url)}" role="button" tabindex="0" aria-label="写真を大きく見る"><img src="${esc(url)}" alt="" decoding="async"></div>`
+    ? `<div class="mhero-img zoomable" data-act="viewPhoto" data-val="${esc(url)}" role="button" tabindex="0" aria-label="写真を大きく見る"><img src="${esc(first)}"${first !== url ? ` data-full="${esc(url)}"` : ""} alt="" decoding="async"></div>`
     : `<div class="mhero-img empty" aria-hidden="true">${carSvg(v ? carColor(v) : CAR_COLORS[0])}</div>`;
 }
 let pendingPhoto = null; // フォームで選んだ写真（保存するときに送る）
@@ -1172,7 +1205,7 @@ async function pickFormPhoto(input) {
   } catch (e) {
     console.error(e);
     if ($("vform") !== form) return;
-    const cur = modalId && byId(modalId); prev.innerHTML = formPhotoHtml(cur && cur.photoUrl, cur);
+    const cur = modalId && byId(modalId); prev.innerHTML = formPhotoHtml(cur && cur.photoUrl, cur); loadImages(prev);
     err.textContent = photoErrMsg(e); err.hidden = false;
   }
 }

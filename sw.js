@@ -1,8 +1,11 @@
 // 社用車管理 service worker
 // - アプリの画面（HTML/CSS/JS/アイコン）は「新しいものを優先、つながらないときは保存済みを使う」
 // - Firebase の SDK とフォントは一度読んだら保存済みを使う（版が固定のため）
-// - データ（Firestore）と写真（Storage）は Firebase が自分で処理するので、ここでは触らない
-const CACHE = "sharyo-v7"; // 版を上げると、スマホに保存した古い画面・アイコンを入れ替える
+// - 車・修理の写真（Firebase Storage）は、一度表示したら端末に保存して次からはそこから出す（最大80枚、古い順に消す）
+//   写真を変えると写真のアドレスが変わるので、新しい写真は自動で取りに行く
+// - データ（Firestore）は Firebase が自分で処理するので、ここでは触らない
+const CACHE = "sharyo-v8"; // 版を上げると、スマホに保存した古い画面・アイコンを入れ替える
+const PHOTO_CACHE = "sharyo-photos-v1", PHOTO_MAX_ITEMS = 80; // 写真の置き場（画面の版を上げても消さない）
 const SHELL = [
   "./", "./index.html", "./style.css", "./app.js", "./firebase-config.js", "./manifest.webmanifest",
   "./icons/icon-192.png?v=2", "./icons/icon-512.png?v=2", "./icons/icon-maskable-192.png?v=3", "./icons/icon-maskable-512.png?v=3",
@@ -14,7 +17,7 @@ self.addEventListener("install", e => {
 });
 self.addEventListener("activate", e => {
   e.waitUntil(caches.keys()
-    .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+    .then(keys => Promise.all(keys.filter(k => k !== CACHE && k !== PHOTO_CACHE).map(k => caches.delete(k))))
     .then(() => self.clients.claim()));
 });
 
@@ -31,6 +34,17 @@ self.addEventListener("fetch", e => {
         return res;
       }).catch(() => caches.match(req, { ignoreSearch: true }).then(r => r || caches.match("./index.html")))
     );
+    return;
+  }
+  // 車・修理の写真（写真そのもの。alt=media）: 保存済みを優先。なければ取りに行って保存する
+  if (url.hostname === "firebasestorage.googleapis.com" && url.searchParams.get("alt") === "media" && /\/o\/(vehicles|repairs)%2F/.test(url.pathname)) {
+    e.respondWith(caches.open(PHOTO_CACHE).then(c => c.match(req).then(hit => hit || fetch(req).then(res => {
+      if (res.ok || res.type === "opaque") {
+        const copy = res.clone();
+        e.waitUntil(c.put(req, copy).then(() => c.keys()).then(keys => Promise.all(keys.slice(0, Math.max(0, keys.length - PHOTO_MAX_ITEMS)).map(k => c.delete(k)))));
+      }
+      return res;
+    }))));
     return;
   }
   // Firebase SDK（www.gstatic.com/firebasejs/版番号/…）とフォント: 保存済みを優先
