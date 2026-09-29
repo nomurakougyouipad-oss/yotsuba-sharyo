@@ -394,3 +394,8 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
 .table td .s.overdue-s{color:var(--fix-deep);font-weight:700}
 /* 詳細の行の中の赤い文字（修理の内容・車検・返却予定を過ぎた日） */
 .row .v .warn{color:var(--fix-t)}
+
+/* ---- 写真：読み込み中の見本、失敗のお知らせ、送信中のボタン ---- */
+.loading-thumb{font-size:12px;color:var(--mute);text-align:center;padding:6px}
+.toast.err{background:var(--fix);color:#fff}
+.photo-btn.busy{cursor:default;color:var(--steel-t);border-color:var(--steel-t)}

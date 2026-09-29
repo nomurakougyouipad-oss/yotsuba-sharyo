@@ -303,7 +303,7 @@ function detail(v) {
     ? `<button class="btn primary" data-act="goto" data-val="return" data-id="${v.id}">返却する</button>`
     : (st === "free" ? (canReserve(v) ? `<button class="btn primary" data-act="goto" data-val="reserve" data-id="${v.id}">この車を予約する</button>`
       : `<p class="ownnote">この車は${esc(v.owner)}さん専用です</p>`) : "");
-  return `<div class="hero">${thumbHtml(v, true)}${plateHtml(v)}${vehicleTags(v)}</div>
+  return `<div class="hero">${thumbHtml(v, true)}${plateHtml(v)}${vehicleTags(v)}${photoBtn(v)}</div>
   <div class="rows">${rows.map(([k, val]) => `<div class="row"><span class="k">${k}</span><span class="v">${val}</span></div>`).join("")}</div>
   <div class="actions">${actions}<button class="btn ghost" data-act="goto" data-val="repair" data-id="${v.id}">修理を頼む</button></div>
   ${calendar(v)}`;
@@ -476,7 +476,7 @@ function repairForm(v) {
   <div class="field"><label>どこが悪い？（複数OK）</label><div class="sympt">${SYMPTOMS.map(x => `<button class="chip ${rform.sym.has(x) ? "on" : ""}" data-act="sym" data-val="${x}">${x}</button>`).join("")}</div></div>
   <div class="field"><label for="r-memo">くわしく（任意）</label><textarea id="r-memo" name="memo" rows="3" maxlength="2000" placeholder="例：右に曲がるときにゴトゴト鳴る">${esc(rform.memo)}</textarea></div>
   <div class="field">${rform.photos.length < MAX_REPAIR_PHOTOS
-    ? `<label class="photo-box">📷 写真をつける${rform.photos.length ? `（${rform.photos.length}枚）` : ""}<input type="file" id="r-photo" accept="image/*" multiple hidden></label>` : ""}
+    ? `<label class="photo-box">📷 写真をつける${rform.photos.length ? `（${rform.photos.length}枚）` : ""}<input type="file" id="r-photo" accept="image/*,.heic,.heif" multiple hidden></label>` : ""}
     ${rform.photos.length ? `<div class="rphotos">${rform.photos.map((p, i) => `<div class="rphoto"><img src="${p.url}" alt=""><button class="rm" data-act="rmPhoto" data-val="${i}" aria-label="この写真をはずす">×</button></div>`).join("")}</div>` : ""}</div>
   ${rform.err ? `<p class="ferr">${esc(rform.err)}</p>` : ""}
   <div class="actions"><button class="btn primary big" data-act="sendRepair" data-id="${v.id}"${rform.busy ? " disabled" : ""}>${rform.busy ? (rform.photos.length ? `写真を送っています… ${rform.pct}%` : "送っています…") : "修理を頼む"}</button></div>`;
@@ -636,6 +636,34 @@ async function decodeImage(file) {
     return await new Promise((ok, ng) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => ng(new Error("画像を読めません")); i.src = url; });
   } finally { URL.revokeObjectURL(url); }
 }
+// iPhone の HEIC 写真は、パソコンの Chrome / Edge では読めない。そのときだけ変換の部品（heic-to。新しい iPhone の HEIC にも対応）を読み込んで JPEG にする
+const HEIC_LIB_URL = "https://cdn.jsdelivr.net/npm/heic-to@1.5.2/dist/iife/heic-to.js";
+const isHeic = f => /image\/hei[cf]/i.test(f.type || "") || /\.(heic|heif)$/i.test(f.name || "");
+let heicLib = null;
+function loadHeicLib() {
+  if (!heicLib) heicLib = new Promise((ok, ng) => {
+    if (window.HeicTo) return ok(window.HeicTo);
+    const sc = document.createElement("script"); sc.src = HEIC_LIB_URL; sc.async = true;
+    sc.onload = () => (window.HeicTo ? ok(window.HeicTo) : ng(new Error("heic-lib")));
+    sc.onerror = () => { heicLib = null; ng(new Error("heic-lib")); };
+    document.head.appendChild(sc);
+  });
+  return heicLib;
+}
+// 写真を読み込む。読めない形式なら Error("bad-image")、HEIC の変換部品が読めなければ Error("heic-lib")
+async function readPhoto(file) {
+  if (file.type && !file.type.startsWith("image/") && !isHeic(file)) throw new Error("bad-image");
+  try { return await decodeImage(file); } catch (e) { if (!isHeic(file)) throw new Error("bad-image"); }
+  const HeicTo = await loadHeicLib();
+  let jpeg;
+  try { jpeg = await HeicTo({ blob: file, type: "image/jpeg", quality: 0.9 }); }
+  catch (e) { console.error(e); throw new Error("bad-image"); }
+  try { return await decodeImage(jpeg); } catch (e) { throw new Error("bad-image"); }
+}
+const photoErrMsg = e => (e && e.message === "bad-image" ? "この形式の写真は使えません。JPEGかPNGを選んでください"
+  : e && e.message === "heic-lib" ? "iPhoneの写真（HEIC）を変換できませんでした。電波のよい所でもう一度選ぶか、JPEGかPNGを選んでください"
+  : "写真を送れませんでした。電波のよい所でもう一度お試しください");
+
 // 長い辺が max px になるよう縮めて JPEG にする
 function toJpeg(img, max, quality) {
   const w0 = img.naturalWidth || img.width, h0 = img.naturalHeight || img.height;
@@ -655,8 +683,7 @@ function uploadBlob(path, blob, onBytes) {
 }
 // 1枚の写真から「大（1280px）」と「一覧用の小（480px）」を作って送る。dir は "vehicles/{id}" など
 async function makePhotos(file, dir, onProgress) {
-  if (file.type && !file.type.startsWith("image/")) throw new Error("not-image");
-  const img = await decodeImage(file);
+  const img = await readPhoto(file);
   let big, small;
   try { big = await toJpeg(img, PHOTO_MAX, 0.85); small = await toJpeg(img, THUMB_MAX, 0.8); }
   finally { if (img.close) img.close(); }
@@ -671,24 +698,33 @@ async function makePhotos(file, dir, onProgress) {
   return { photoUrl, thumbUrl, photoPath, thumbPath };
 }
 
-// 車両の写真を登録・変更（PCの登録・修正フォームからのみ。スマホは見るだけ）
-const uploading = new Set(); // 送信中の車ID
+// 車両の写真を登録・変更（スマホの車両詳細と、PCの車両の修正・追加から）
+const uploading = {}; // 車ID → 送信中の％
+function photoBtn(v) {
+  const pct = uploading[v.id];
+  if (pct != null) return `<span class="photo-btn busy" data-upl="${v.id}">📷 送っています… ${pct}%</span>`;
+  return `<label class="photo-btn">📷 ${v.photoUrl ? "写真を変える" : "写真を登録"}<input type="file" accept="image/*,.heic,.heif" hidden data-photo="${v.id}"></label>`;
+}
 async function setVehiclePhoto(vid, file) {
-  if (uploading.has(vid)) { toast("この車の写真を送っているところです"); return; }
+  if (uploading[vid] != null) { toast("この車の写真を送っているところです"); return; }
   const old = byId(vid) || {};
   const oldPaths = [old.photoPath, old.thumbPath].filter(Boolean);
-  uploading.add(vid);
-  toast("写真を送っています…");
+  uploading[vid] = 0; refresh();
+  if (ui.view === "pc") toast("写真を送っています…");
   try {
-    const p = await makePhotos(file, `vehicles/${vid}`, pct => toast(`写真を送っています… ${pct}%`));
+    const p = await makePhotos(file, `vehicles/${vid}`, pct => {
+      uploading[vid] = pct;
+      document.querySelectorAll(`[data-upl="${vid}"]`).forEach(el => { el.textContent = `📷 送っています… ${pct}%`; });
+      if (ui.view === "pc") toast(`写真を送っています… ${pct}%`);
+    });
     await updateDoc(doc(db, "vehicles", vid), { ...p, updatedAt: serverTimestamp() });
     oldPaths.forEach(x => deleteObject(storageRef(storage, x)).catch(() => {})); // 前の写真は片づける
     toast("写真を登録しました");
   } catch (e) {
     console.error(e);
-    toast(e.message === "not-image" ? "写真（画像）を選んでください" : "写真を送れませんでした。電波のよい所でもう一度お試しください");
+    toast(photoErrMsg(e), "err"); // 失敗したら赤いお知らせを長めに出す
   } finally {
-    uploading.delete(vid);
+    delete uploading[vid]; refresh();
   }
 }
 
@@ -781,7 +817,7 @@ function openModal(id) {
         ${lots.map(l => `<option${(v ? lotOf(v) === l : l === lots[0]) ? " selected" : ""}>${esc(l)}</option>`).join("")}</select></div>
       <div class="field"><label>写真（任意）</label>
         <div class="photo-pick"><span id="f-prev">${v ? thumbHtml(v) : `<div class="thumb">${carSvg(CAR_COLORS[0])}</div>`}</span>
-        <label class="photo-btn">📷 ${v && v.photoUrl ? "写真を変える" : "写真を選ぶ"}<input type="file" accept="image/*" hidden id="f-photo"></label></div></div>
+        <label class="photo-btn">📷 ${v && v.photoUrl ? "写真を変える" : "写真を選ぶ"}<input type="file" accept="image/*,.heic,.heif" hidden id="f-photo"></label></div></div>
     </div>
     <div class="mfoot">
       ${v ? `<button type="button" class="btn danger" data-act="retire">廃車にする</button><button type="button" class="btn ghost" data-act="hideCar">${v.hidden ? "表示に戻す" : "一時的に隠す"}</button>` : ""}
@@ -975,6 +1011,7 @@ function saveVehicle(form) {
     const dup = S.vehicles.find(x => x.id !== modalId && key(x) === key(data));
     if (dup) err = `同じナンバーの車がすでにあります（${dup.kind}${dup.retired ? "・廃車済み" : ""}）`;
   }
+  if (!err && $("f-prev") && $("f-prev").querySelector(".loading-thumb")) err = "写真を読み込んでいます。少し待ってから保存してください";
   if (err) { const e = $("ferr"); e.textContent = err; e.hidden = false; return; }
 
   // 電波が悪くても画面はすぐ閉じる（Firestore が裏で送る）
@@ -1089,11 +1126,34 @@ async function unseed() {
   } catch (e) { console.error(e); toast("消せませんでした"); }
 }
 
+// PCの登録フォームで写真を選んだとき：その場で読み込んで見本を出す（HEIC は JPEG に変換）。読めなければ案内を出して保存させない
+async function pickFormPhoto(input) {
+  const f = input.files && input.files[0]; input.value = ""; if (!f) return;
+  const prev = $("f-prev"), err = $("ferr"), form = $("vform");
+  if (pendingPhoto) URL.revokeObjectURL(pendingPhoto.preview);
+  pendingPhoto = null;
+  err.hidden = true;
+  prev.innerHTML = `<div class="thumb loading-thumb">写真を読み込んでいます…</div>`;
+  try {
+    const img = await readPhoto(f);
+    let jpeg; try { jpeg = await toJpeg(img, PHOTO_MAX, 0.9); } finally { if (img.close) img.close(); }
+    if ($("vform") !== form) return; // 読み込み中にフォームを閉じた
+    pendingPhoto = { file: jpeg, preview: URL.createObjectURL(jpeg) };
+    prev.innerHTML = `<div class="thumb"><img src="${pendingPhoto.preview}" alt=""></div>`;
+  } catch (e) {
+    console.error(e);
+    if ($("vform") !== form) return;
+    prev.innerHTML = `<div class="thumb">${carSvg(CAR_COLORS[0])}</div>`;
+    err.textContent = photoErrMsg(e); err.hidden = false;
+  }
+}
+
 /* ---------- お知らせ ---------- */
 let toastTimer;
-function toast(msg) {
+function toast(msg, kind) {
   const el = $("toast"); el.textContent = msg; el.hidden = false;
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, 2600);
+  el.classList.toggle("err", kind === "err");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, kind === "err" ? 8000 : 2600);
 }
 
 /* ---------- 操作 ---------- */
@@ -1144,12 +1204,11 @@ document.addEventListener("change", e => {
   if (el.id === "r-photo") { // 修理を頼む：写真をつける（複数OK）
     addRepairPhotos(el.files); el.value = "";
   }
-  if (el.id === "f-photo") { // PCの登録フォーム（保存を押したときに送る）
-    const f = el.files && el.files[0]; if (!f) return;
-    if (pendingPhoto) URL.revokeObjectURL(pendingPhoto.preview);
-    pendingPhoto = { file: f, preview: URL.createObjectURL(f) };
-    $("f-prev").innerHTML = `<div class="thumb"><img src="${pendingPhoto.preview}" alt=""></div>`;
+  if (el.dataset && el.dataset.photo) { // スマホの車両詳細の「📷 写真を登録」
+    const f = el.files && el.files[0]; el.value = "";
+    if (f) setVehiclePhoto(el.dataset.photo, f);
   }
+  if (el.id === "f-photo") pickFormPhoto(el); // PCの登録フォーム（保存を押したときに送る）
 });
 // 設定画面：名簿の検索、追加欄で Enter を押したとき
 document.addEventListener("input", e => { if (e.target.id === "memSearch") { memQuery = e.target.value; renderMemberList(); } });
