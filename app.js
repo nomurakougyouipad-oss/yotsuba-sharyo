@@ -797,6 +797,11 @@ function openModal(id) {
   $("modal").innerHTML = `<div class="overlay"><form class="modal panel" id="vform" novalidate>
     <h2>${v ? "車両を修正" : "車両を追加"}<button type="button" class="x" data-act="close" aria-label="閉じる">×</button></h2>
     <div class="mbody">
+      <div class="mhero">
+        <div id="f-prev">${formPhotoHtml(v && v.photoUrl, v)}</div>
+        ${v ? plateHtml(v) : ""}
+        <label class="photo-btn">📷 ${v && v.photoUrl ? "写真を変える" : "写真を登録"}<input type="file" accept="image/*,.heic,.heif" hidden id="f-photo"></label>
+      </div>
       <p class="ferr" id="ferr" hidden></p>
       <div class="field"><label>ナンバー</label>
         <div class="plate-in">
@@ -820,9 +825,6 @@ function openModal(id) {
         ${v && v.owner && !activeMembers().some(m => m.name === v.owner) ? `<option selected>${esc(v.owner)}</option>` : ""}</select></div>
       <div class="field"><label for="f-lot">置き場所</label><select id="f-lot" name="lot">
         ${lots.map(l => `<option${(v ? lotOf(v) === l : l === lots[0]) ? " selected" : ""}>${esc(l)}</option>`).join("")}</select></div>
-      <div class="field"><label>写真（任意）</label>
-        <div class="photo-pick"><span id="f-prev">${v ? thumbHtml(v) : `<div class="thumb">${carSvg(CAR_COLORS[0])}</div>`}</span>
-        <label class="photo-btn">📷 ${v && v.photoUrl ? "写真を変える" : "写真を選ぶ"}<input type="file" accept="image/*,.heic,.heif" hidden id="f-photo"></label></div></div>
     </div>
     <div class="mfoot">
       ${v ? `<button type="button" class="btn danger" data-act="retire">廃車にする</button><button type="button" class="btn ghost" data-act="hideCar">${v.hidden ? "表示に戻す" : "一時的に隠す"}</button>` : ""}
@@ -833,6 +835,12 @@ function openModal(id) {
   </form></div>`;
   $("modal").hidden = false;
   $("vform").plateArea.focus();
+}
+// フォームの上の大きい写真。url があれば押すと画面いっぱいに開く。なければ車のイラスト
+function formPhotoHtml(url, v) {
+  return url
+    ? `<div class="mhero-img zoomable" data-act="viewPhoto" data-val="${esc(url)}" role="button" tabindex="0" aria-label="写真を大きく見る"><img src="${esc(url)}" alt="" decoding="async"></div>`
+    : `<div class="mhero-img empty" aria-hidden="true">${carSvg(v ? carColor(v) : CAR_COLORS[0])}</div>`;
 }
 let pendingPhoto = null; // フォームで選んだ写真（保存するときに送る）
 function closeModal() {
@@ -1138,17 +1146,17 @@ async function pickFormPhoto(input) {
   if (pendingPhoto) URL.revokeObjectURL(pendingPhoto.preview);
   pendingPhoto = null;
   err.hidden = true;
-  prev.innerHTML = `<div class="thumb loading-thumb">写真を読み込んでいます…</div>`;
+  prev.innerHTML = `<div class="mhero-img empty loading-thumb">写真を読み込んでいます…</div>`;
   try {
     const img = await readPhoto(f);
     let jpeg; try { jpeg = await toJpeg(img, PHOTO_MAX, 0.9); } finally { if (img.close) img.close(); }
     if ($("vform") !== form) return; // 読み込み中にフォームを閉じた
     pendingPhoto = { file: jpeg, preview: URL.createObjectURL(jpeg) };
-    prev.innerHTML = `<div class="thumb"><img src="${pendingPhoto.preview}" alt=""></div>`;
+    prev.innerHTML = formPhotoHtml(pendingPhoto.preview);
   } catch (e) {
     console.error(e);
     if ($("vform") !== form) return;
-    prev.innerHTML = `<div class="thumb">${carSvg(CAR_COLORS[0])}</div>`;
+    const cur = modalId && byId(modalId); prev.innerHTML = formPhotoHtml(cur && cur.photoUrl, cur);
     err.textContent = photoErrMsg(e); err.hidden = false;
   }
 }
@@ -1316,7 +1324,7 @@ document.addEventListener("keydown", e => {
 });
 document.addEventListener("keydown", e => {
   if (e.key === "Escape") { if (viewer) closeViewer(); else if (!$("modal").hidden) closeModal(); }
-  if (e.key === "Enter" && e.target.matches && e.target.matches(".thumb.zoomable")) e.target.click();
+  if (e.key === "Enter" && e.target.matches && e.target.matches(".zoomable")) e.target.click();
 });
 document.addEventListener("toggle", e => {
   if (!e.target.matches) return;
