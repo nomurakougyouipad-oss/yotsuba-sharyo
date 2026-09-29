@@ -1,11 +1,11 @@
 // 社用車管理 service worker
 // - アプリの画面（HTML/CSS/JS/アイコン）は「新しいものを優先、つながらないときは保存済みを使う」
 // - Firebase の SDK とフォントは一度読んだら保存済みを使う（版が固定のため）
-// - 車・修理の写真（Firebase Storage）は、一度表示したら端末に保存して次からはそこから出す（最大80枚、古い順に消す）
+// - 車・修理の写真（Firebase Storage）は、一度表示したら端末に保存して次からはそこから出す（最大200枚、古い順に消す）
 //   写真を変えると写真のアドレスが変わるので、新しい写真は自動で取りに行く
 // - データ（Firestore）は Firebase が自分で処理するので、ここでは触らない
 const CACHE = "sharyo-v8"; // 版を上げると、スマホに保存した古い画面・アイコンを入れ替える
-const PHOTO_CACHE = "sharyo-photos-v1", PHOTO_MAX_ITEMS = 80; // 写真の置き場（画面の版を上げても消さない）
+const PHOTO_CACHE = "sharyo-photos-v1", PHOTO_MAX_ITEMS = 200; // 写真の置き場（画面の版を上げても消さない）
 const SHELL = [
   "./", "./index.html", "./style.css", "./app.js", "./firebase-config.js", "./manifest.webmanifest",
   "./icons/icon-192.png?v=2", "./icons/icon-512.png?v=2", "./icons/icon-maskable-192.png?v=3", "./icons/icon-maskable-512.png?v=3",
