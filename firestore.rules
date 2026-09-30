@@ -61,7 +61,9 @@ service cloud.firestore {
         && str(d.site, 100)
         && isDate(d.from) && isDate(d.to) && d.from <= d.to
         && optStr(d, 'createdBy', 40)
-        && optStr(d, 'returnedLot', 30);
+        && optStr(d, 'returnedLot', 30)
+        && (!('canceled' in d) || d.canceled is bool)
+        && optStr(d, 'canceledBy', 40);
     }
     match /reservations/{reservationId} {
       allow read: if signedIn();

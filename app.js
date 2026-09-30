@@ -358,12 +358,15 @@ function detail(v) {
   return `<div class="hero">${thumbHtml(v, true, true)}${plateHtml(v)}${vehicleTags(v)}${photoBtn(v)}</div>
   <div class="rows">${rows.map(([k, val]) => `<div class="row"><span class="k">${k}</span><span class="v">${val}</span></div>`).join("")}</div>
   <div class="actions">${actions}<button class="btn ghost" data-act="goto" data-val="repair" data-id="${v.id}">修理を頼む</button></div>
-  ${calendar(v)}`;
+  ${calendar(v)}
+  ${resList(v)}`;
 }
 
 // 今月のカレンダー（予約・使用中の日をオレンジ、今日を枠線）
+// 車の詳細のカレンダー（月を前後に切り替えられる。予約の日だけ色を付けるので飛び飛びでも分かる）
+let detMonth = 0; // 今月から何か月先か
 function calendar(v) {
-  const td = today(), y = td.getFullYear(), m = td.getMonth();
+  const td = today(), base = new Date(td.getFullYear(), td.getMonth() + detMonth, 1), y = base.getFullYear(), m = base.getMonth();
   const first = new Date(y, m, 1), last = new Date(y, m + 1, 0);
   const lo = ymd(first), hi = ymd(last), busy = new Set();
   S.reservations.filter(r => r.vehicleId === v.id && !r.returnedAt && (r.to >= lo || isOverdue(r)) && r.from <= hi).forEach(r => {
@@ -377,8 +380,17 @@ function calendar(v) {
     cells += `<div class="d ${busy.has(k) ? "use" : ""} ${k === ymd(td) ? "today" : ""}">${d}</div>`;
   }
   const next = nextRes(v);
-  return `<div class="cal"><h3>${m + 1}月の予定</h3><div class="grid">${cells}</div>
-  <div class="legend"><i></i>予約・使用中${next ? ` ／ 次の予約：${fmt(next.from)}〜 ${esc(next.who)}さん（${esc(next.site)}）` : ""}</div></div>`;
+  return `<div class="cal"><div class="cal-head"><button type="button" class="pcal-nav" data-act="detMonth" data-val="-1"${detMonth <= 0 ? " disabled" : ""} aria-label="前の月">‹</button><h3>${y !== td.getFullYear() ? `${y}年` : ""}${m + 1}月の予定</h3><button type="button" class="pcal-nav" data-act="detMonth" data-val="1"${detMonth >= 12 ? " disabled" : ""} aria-label="次の月">›</button></div><div class="grid">${cells}</div>
+  <div class="legend"><i></i>予約・使用中${next ? ` ／ 次の予約：${rangeText(next)} ${esc(next.who)}さん（${esc(next.site)}）` : ""}</div></div>`;
+}
+
+// この車のこれからの予約（使用中は除く）。取り消せるものには「取り消す」
+function resList(v) {
+  const t = ymd(today());
+  const list = S.reservations.filter(r => r.vehicleId === v.id && !r.returnedAt && r.from > t).sort((a, b) => (a.from > b.from ? 1 : -1));
+  if (!list.length) return "";
+  return `<div class="reslist"><h3>この車の予約</h3>${list.map(r => `<div class="resrow"><div class="grow"><b>${rangeText(r)}</b><span>${esc(r.who)}さん　${esc(r.site)}</span></div>
+    ${canCancel(r) ? `<button class="btn ghost small" data-act="cancelRes" data-id="${r.id}">取り消す</button>` : ""}</div>`).join("")}</div>`;
 }
 
 /* ---------- 予約 ---------- */
@@ -386,23 +398,76 @@ const SITE_OTHER = "__other";
 const plateText = v => `${esc(v.plateArea)} ${esc(v.plateClass)} ${esc(v.plateKana)} ${esc(v.plateNum)}`;
 // 同じ車で日付が重なる予約（返却済みは除く）
 const effTo = r => (!r.returnedAt && r.to < ymd(today()) ? "9999-12-31" : r.to);
-const findClash = (list, vid, from, to) => list.find(r => r.vehicleId === vid && !r.returnedAt && r.from <= to && from <= effTo(r)) || null;
+const findClash = (list, vid, from, to) => list.find(r => r.vehicleId === vid && !r.returnedAt && !r.canceled && r.from <= to && from <= effTo(r)) || null;
 const clashMsg = r => (effTo(r) !== r.to
   ? `この車は返却予定（${fmt(r.to)}）を過ぎて、まだ返却されていません（${r.who}さん）。返却されるまで予約できません`
   : `その日は予約が入っています：${fmt(r.from)}〜${fmt(r.to)} ${r.who}さん（${r.site}）`);
 class ClashError extends Error {}
+const rangeText = r => (r.from === r.to ? fmt(r.from) : `${fmt(r.from)}〜${fmt(r.to)}`);
+// 取り消せるのは、まだ始まっていない予約。スマホは予約した本人（使う人か予約した人）、PC（広い画面）は全部
+const canCancel = r => r.from > ymd(today()) && (wide.matches || (!!ME && (r.who === ME || r.createdBy === ME)));
+function cancelReservation(id) {
+  const r = S.reservations.find(x => x.id === id); if (!r) return;
+  if (!canCancel(r)) { toast("この予約は取り消せません"); return; }
+  const v = byId(r.vehicleId);
+  if (!confirm(`${rangeText(r)} ${v ? v.kind : ""}の予約を取り消しますか？`)) return;
+  // データは消さずに「取り消し済み」の印と、取り消した人・日時を残す
+  updateDoc(doc(db, "reservations", id), { canceled: true, canceledBy: ME || "事務所（PC）", canceledAt: serverTimestamp() })
+    .catch(e => { console.error(e); toast("取り消せませんでした。もう一度お試しください", "err"); });
+  toast("予約を取り消しました");
+}
+// 選んだ日を、続いている日ごとの予約（from〜to）にまとめる
+function toRanges(days) {
+  const out = [];
+  [...days].sort().forEach(d => {
+    const last = out[out.length - 1];
+    if (last && ymd(addDays(parse(last.to), 1)) === d) last.to = d; else out.push({ from: d, to: d });
+  });
+  return out;
+}
+// この車で、もう予約・使用中の日（返却待ちは返却されるまでずっと）
+function takenDays(vid) {
+  const set = new Set(), limit = ymd(addDays(today(), 400));
+  S.reservations.filter(r => r.vehicleId === vid && !r.returnedAt).forEach(r => {
+    const end = isOverdue(r) ? limit : r.to;
+    for (let d = parse(r.from); ymd(d) <= end && ymd(d) <= limit; d.setDate(d.getDate() + 1)) set.add(ymd(d));
+  });
+  return set;
+}
+// 予約画面のカレンダー（押して選ぶ、もう一度押すと外れる。過去の日と、予約・使用中の日は押せない）
+function pickCalendar(v) {
+  const td = today(), t = ymd(td);
+  const [y, m] = form.month;
+  const first = new Date(y, m, 1), last = new Date(y, m + 1, 0);
+  const taken = takenDays(v.id), sel = new Set(form.days);
+  const atFirst = y === td.getFullYear() && m === td.getMonth();
+  let cells = [..."日月火水木金土"].map(d => `<div class="pd dow">${d}</div>`).join("");
+  for (let i = 0; i < first.getDay(); i++) cells += `<div class="pd blank"></div>`;
+  for (let d = 1; d <= last.getDate(); d++) {
+    const k = ymd(new Date(y, m, d)), past = k < t, busy = taken.has(k), on = sel.has(k);
+    cells += `<button type="button" class="pd${on ? " on" : ""}${busy ? " taken" : ""}${past ? " past" : ""}${k === t ? " today" : ""}" data-act="pickDay" data-val="${k}"${past || busy ? " disabled" : ""} aria-pressed="${on}" aria-label="${m + 1}月${d}日${busy ? "（予約あり）" : ""}">${d}</button>`;
+  }
+  const days = [...form.days].sort();
+  return `<div class="pcal">
+    <div class="pcal-head"><button type="button" class="pcal-nav" data-act="calMonth" data-val="-1"${atFirst ? " disabled" : ""} aria-label="前の月">‹</button>
+      <b>${y}年${m + 1}月</b><button type="button" class="pcal-nav" data-act="calMonth" data-val="1" aria-label="次の月">›</button></div>
+    <div class="pcal-grid">${cells}</div>
+    <div class="pcal-legend"><span><i class="lg-on"></i>選んだ日</span><span><i class="lg-taken"></i>予約・使用中</span></div>
+    <div class="pcal-sel">${days.length ? `選んだ日：${days.map(fmt).join("、")}（${days.length}日）` : "予約する日を押して選んでください（何日でも選べます）"}</div>
+  </div>`;
+}
 
 function reserveForm(v) {
   const t = ymd(today());
   if (form.vid !== v.id) { resetForm(); form.vid = v.id; }
-  form.from = form.from || t; form.to = form.to || form.from; form.site = form.site || "";
+  if (!form.days) form.days = [];
+  if (!form.month) { const td = today(); form.month = [td.getFullYear(), td.getMonth()]; }
+  form.site = form.site || "";
   const sites = S.settings.sites || [];
   const lic = licOf(v);
   return `<div class="sheet-title">${esc(v.kind)}</div><p class="sub">${plateText(v)}</p>
   ${lic !== "普通" ? `<div class="licwarn">⚠ この車は${lic}以上の免許が必要です<small>${esc(LICENSE_NOTE[lic])}</small></div>` : ""}
-  <div class="field"><label>いつからいつまで</label><div class="two">
-    <input type="date" name="from" value="${form.from}" aria-label="いつから">
-    <input type="date" name="to" value="${form.to}" min="${form.from}" aria-label="いつまで"></div></div>
+  <div class="field"><label>使う日（押して選ぶ。飛び飛びでもOK）</label>${pickCalendar(v)}</div>
   <div class="field"><label>使う人</label>${!form.other
     ? `<div class="mine"><span>${esc(ME)}さん（自分）</span><button class="sw" data-act="whoOther">別の人にする</button></div>`
     : (form.who && !form.picking
@@ -422,17 +487,16 @@ async function doReserve(v) {
   const t = ymd(today());
   const who = form.other ? (form.picking ? "" : (form.who || "")) : ME;
   const site = form.site === SITE_OTHER ? String(form.siteOther || "").trim() : form.site;
-  const { from, to } = form;
+  const ranges = toRanges(form.days || []);
   let err = "";
-  if (!from || !to) err = "いつからいつまでを入れてください";
-  else if (to < from) err = "「いつまで」は「いつから」と同じか後の日にしてください";
-  else if (to < t) err = "過ぎた日は予約できません";
+  if (!ranges.length) err = "予約する日を選んでください";
+  else if (ranges[0].from < t) err = "過ぎた日は予約できません";
   else if (!who || !site) err = "使う人と現場を選んでください";
-  else { const c = findClash(S.reservations, v.id, from, to); if (c) err = clashMsg(c); }
+  else { for (const g of ranges) { const c = findClash(S.reservations, v.id, g.from, g.to); if (c) { err = clashMsg(c); break; } } }
   if (err) { form.err = err; render(); return; }
 
   form.err = ""; form.busy = true; render();
-  const r = { vehicleId: v.id, who, site, from, to, createdBy: ME, returnedAt: null, returnedLot: null };
+  const base = { vehicleId: v.id, who, site, createdBy: ME, returnedAt: null, returnedLot: null };
   try {
     // 2台のスマホで同時に予約しても重ならないよう、サーバーの最新の予約で確かめてから登録する
     await runTransaction(db, async tx => {
@@ -440,10 +504,11 @@ async function doReserve(v) {
       const vs = await tx.get(vref);
       if (!vs.exists() || vs.data().retired) throw new ClashError("この車は予約できません");
       const snap = await getDocsFromServer(query(collection(db, "reservations"), where("vehicleId", "==", v.id), where("returnedAt", "==", null)));
-      const c = findClash(snap.docs.map(d => d.data()), v.id, from, to);
-      if (c) throw new ClashError(clashMsg(c));
+      const list = snap.docs.map(d => d.data());
+      for (const g of ranges) { const c = findClash(list, v.id, g.from, g.to); if (c) throw new ClashError(clashMsg(c)); }
       tx.update(vref, { resSeq: increment(1), updatedAt: serverTimestamp() });
-      tx.set(doc(collection(db, "reservations")), { ...r, createdAt: serverTimestamp() });
+      // 続いている日ごとに1つの予約。全部まとめて登録する（途中で1つだけ入ることはない）
+      ranges.forEach(g => tx.set(doc(collection(db, "reservations")), { ...base, from: g.from, to: g.to, createdAt: serverTimestamp() }));
     });
   } catch (e) {
     console.error(e);
@@ -453,7 +518,7 @@ async function doReserve(v) {
     return;
   }
   resetForm();
-  go({ name: "done", title: "予約しました", msg: `${fmt(from)}〜${fmt(to)}　${who}さん　${site}` });
+  go({ name: "done", title: "予約しました", msg: `${ranges.map(rangeText).join("、")}　${who}さん　${site}` });
 }
 
 /* ---------- 自分が使用中の車（返し忘れ防止の帯） ---------- */
@@ -476,7 +541,7 @@ function myBar() {
       <div class="mu-head">${over ? "⚠ 返却予定を過ぎています" : "あなたが使用中の車"}</div>
       <div class="mu-body"><div class="mu-info"><b>${esc(v.kind)}</b><span class="mu-plate">${plateText(v)}</span><span class="mu-to">${dayLabel(r.to)}まで</span></div>
         <button class="mu-btn" data-act="myReturn" data-id="${v.id}" data-val="${r.id}">返却する</button></div></div>`;
-  }).join("")}${next ? `<button class="mynext" data-act="detail" data-id="${next.vehicleId}">次の予約：${fmt(next.from)}〜 ${esc(byId(next.vehicleId).kind)}<span>›</span></button>` : ""}</div>`;
+  }).join("")}${next ? `<div class="mynext-row"><button class="mynext" data-act="detail" data-id="${next.vehicleId}">次の予約：${rangeText(next)} ${esc(byId(next.vehicleId).kind)}<span>›</span></button>${canCancel(next) ? `<button class="mu-cancel" data-act="cancelRes" data-id="${next.id}">取り消す</button>` : ""}</div>` : ""}</div>`;
 }
 
 /* ---------- 返却 ---------- */
@@ -808,7 +873,7 @@ function futurePanel() {
     .sort((a, b) => (a.from > b.from ? 1 : a.from < b.from ? -1 : 0));
   const f = foldList("future", list, "件");
   return `<div class="panel"><h2>この先の予約 <span class="tag plain">${list.length}件</span></h2>
-    ${f.shown.map(r => { const v = byId(r.vehicleId); return `<div class="li"><div class="days" style="background:var(--bg);color:var(--ink)">${fmt(r.from)}〜${fmt(r.to)}</div><div class="grow"><div class="t">${esc(v.kind)}</div><div class="s">${esc(r.who)}さん　${esc(r.site)}</div></div></div>`; }).join("") + f.more || `<div class="empty">予約はありません</div>`}
+    ${f.shown.map(r => { const v = byId(r.vehicleId); return `<div class="li"><div class="days" style="background:var(--bg);color:var(--ink)">${rangeText(r)}</div><div class="grow"><div class="t">${esc(v.kind)}</div><div class="s">${esc(r.who)}さん　${esc(r.site)}</div></div><button class="btn ghost small" data-act="cancelRes" data-id="${r.id}">取り消す</button></div>`; }).join("") + f.more || `<div class="empty">予約はありません</div>`}
   </div>`;
 }
 
@@ -1295,7 +1360,7 @@ document.addEventListener("click", e => {
     case "pcGroup": pcUi.groups[val] = !pcUi.groups[val]; savePcUi(); render(); break;
     case "pcPanel": pcUi.panels[val] = !pcUi.panels[val]; savePcUi(); render(); break;
     case "tfilter": ui.tfilter = val; render(); break;
-    case "detail": go({ name: "detail", id }); break;
+    case "detail": detMonth = 0; go({ name: "detail", id }); break;
     case "back": go(ui.backTo || { name: "list" }); break;
     case "goto": go({ name: val, id }); break;
     case "me": saveMe(val); break;
@@ -1304,6 +1369,10 @@ document.addEventListener("click", e => {
     case "whoMe": form.other = false; form.picking = false; form.who = ""; form.err = ""; render(); break;
     case "pickWho": form.who = val; form.picking = false; form.err = ""; render(); break;
     case "reserve": { const v = byId(id); if (v) doReserve(v); break; }
+    case "pickDay": { if (form.busy) break; const i = (form.days || []).indexOf(val); form.days = i >= 0 ? form.days.filter(d => d !== val) : [...(form.days || []), val]; form.err = ""; render(); break; }
+    case "calMonth": { const [y, m] = form.month; const d = new Date(y, m + Number(val), 1); form.month = [d.getFullYear(), d.getMonth()]; render(); break; }
+    case "cancelRes": cancelReservation(id); break;
+    case "detMonth": detMonth = Math.max(0, Math.min(12, detMonth + Number(val))); render(); break;
     case "return": { const v = byId(id); if (v) doReturn(v, val, el.dataset.rid); break; }
     case "myReturn": go({ name: "return", id, rid: val }); break;
     case "sym": toggleSym(val); break;
@@ -1354,17 +1423,12 @@ $("ph-screen").addEventListener("input", e => {
   if (e.target.id === "whoSearch") { form.whoQ = e.target.value; $("whoList").innerHTML = nameChips(form.whoQ, form.who, "pickWho"); return; }
   const n = e.target.name;
   if (ui.screen.name === "repair" && n === "memo") rform.memo = e.target.value;
-  if (ui.screen.name === "reserve" && ["from", "to", "who", "site", "siteOther"].includes(n)) form[n] = e.target.value;
+  if (ui.screen.name === "reserve" && ["who", "site", "siteOther"].includes(n)) form[n] = e.target.value;
 });
 $("ph-screen").addEventListener("change", e => {
   if (ui.screen.name !== "reserve") return;
   const n = e.target.name;
-  if (form.err) { form.err = ""; if (n !== "from" && n !== "site") render(); } // 直したら古いエラーは消す
-  if (n === "from") {
-    form.from = e.target.value;
-    if (form.from && (!form.to || form.to < form.from)) form.to = form.from; // 「いつまで」を自動でそろえる
-    render();
-  }
+  if (form.err) { form.err = ""; if (n !== "site") render(); } // 直したら古いエラーは消す
   if (n === "site") { form.site = e.target.value; render(); } // 「その他」なら入力欄を出す
 });
 document.addEventListener("keydown", e => {
@@ -1404,7 +1468,7 @@ function startSync() {
     done("v");
   }, onErr);
   onSnapshot(query(collection(db, "reservations"), where("returnedAt", "==", null)), snap => {
-    S.reservations = snapList(snap); done("r");
+    S.reservations = snapList(snap).filter(r => !r.canceled); done("r"); // 取り消した予約は使わない
   }, onErr);
   onSnapshot(collection(db, "repairs"), snap => { S.repairs = snapList(snap); done("p"); }, onErr);
   onSnapshot(collection(db, "members"), snap => {
