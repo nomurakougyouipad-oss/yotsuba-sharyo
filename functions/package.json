@@ -1,0 +1,13 @@
+{
+  "name": "sharyo-functions",
+  "description": "社用車管理アプリのプッシュ通知（車検・返却予定日・返却遅れ・修理依頼）",
+  "private": true,
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "firebase-admin": "^14.5.0",
+    "firebase-functions": "^7.4.0"
+  }
+}

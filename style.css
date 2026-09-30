@@ -464,3 +464,39 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
 /* 車の詳細のカレンダー：月の切り替え */
 .cal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
 .cal-head h3{margin:0}
+
+/* ---- 通知 ---- */
+/* スマホ：右上の名前を押したメニュー */
+.phone header{position:relative}
+.me-menu{position:absolute;right:12px;top:calc(100% - 6px);z-index:20;background:var(--paper);color:var(--ink);border:1.5px solid var(--line-strong);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.18);overflow:hidden;min-width:168px}
+.me-menu button{display:block;width:100%;text-align:left;background:none;border:0;padding:0 16px;min-height:48px;font-size:16px;font-weight:700}
+.me-menu button+button{border-top:1px solid var(--line)}
+/* 車両一覧のいちばん上：通知をオンにする */
+.pushbtn{display:block;width:100%;min-height:52px;margin:0 0 14px;border:2px solid var(--steel-t);border-radius:14px;background:var(--paper);color:var(--steel-t);font-size:17px;font-weight:900}
+.pushnote{margin:0 0 14px;color:var(--mute);font-size:14px;text-align:center;overflow-wrap:anywhere}
+/* スマホの「🔔 通知」：オン・オフのスイッチ */
+.nsw-row{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:60px;padding:6px 4px;border-bottom:1.5px solid var(--line);font-size:17px;font-weight:700;cursor:pointer}
+.switch-in{appearance:none;-webkit-appearance:none;flex:none;width:52px;height:32px;padding:0;border:0;border-radius:999px;background:var(--line-strong);position:relative;cursor:pointer;transition:background .15s}
+.switch-in::after{content:"";position:absolute;top:3px;left:3px;width:26px;height:26px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:transform .15s}
+.switch-in:checked{background:var(--free)}
+.switch-in:checked::after{transform:translateX(20px)}
+/* PC：設定のタブ */
+.stabs{display:flex;gap:4px;padding:0 18px;border-bottom:1.5px solid var(--line)}
+.stabs button{background:none;border:0;border-bottom:3px solid transparent;margin-bottom:-1.5px;padding:10px 18px;font-weight:700;color:var(--mute)}
+.stabs button.on{color:var(--steel-t);border-bottom-color:var(--steel-t)}
+/* PC：設定 → 通知（人ごとのオン・オフの表） */
+.ntable-wrap{max-height:56vh;overflow:auto;border:1.5px solid var(--line);border-radius:12px;margin-top:10px}
+.ntable{width:100%;border-collapse:collapse;font-size:14px}
+.ntable th{position:sticky;top:0;z-index:1;background:var(--paper);border-bottom:1.5px solid var(--line);padding:8px 6px;font-size:14px;text-align:center;vertical-align:top;white-space:nowrap}
+.ntable th:first-child{text-align:left;vertical-align:bottom;padding-left:12px}
+.ntable th small{display:block;font-weight:500;color:var(--mute);font-size:12px}
+.ntable .nall{display:flex;gap:4px;justify-content:center;margin-top:6px}
+.ntable .nall .btn.small{padding:4px 7px;font-size:12px;min-height:28px;border-width:1.5px}
+.ntable td{padding:6px;border-bottom:1px solid var(--line);text-align:center}
+.ntable td.nname{text-align:left;padding-left:12px;white-space:nowrap}
+.ntable td.nname b{margin-right:8px}
+.ntable input[type=checkbox]{width:22px;height:22px;padding:0;cursor:pointer;accent-color:var(--steel)}
+.ntable tr.ngrp td{text-align:left;font-weight:900;color:var(--mute);background:var(--bg);padding:4px 12px;font-size:13px}
+.pst{font-size:11px;color:var(--mute);border:1px solid var(--line-strong);border-radius:6px;padding:1px 6px;font-weight:700}
+.pst.ok{color:var(--free-t);border-color:var(--free-t)}
+#sform.modal{width:min(820px,100%)} /* 通知の表が横に収まるよう、設定だけ少し広く */

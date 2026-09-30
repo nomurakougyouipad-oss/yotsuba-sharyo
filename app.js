@@ -1,5 +1,5 @@
 // 社用車管理アプリ（段階1: 車両一覧・詳細・PC版の登録／修正／廃車・Firestore同期・サンプル投入）
-import { firebaseConfig, FIREBASE_SDK_VERSION } from "./firebase-config.js";
+import { firebaseConfig, FIREBASE_SDK_VERSION, VAPID_KEY } from "./firebase-config.js";
 
 const $ = id => document.getElementById(id);
 
@@ -24,6 +24,7 @@ const {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
   collection, doc, query, where, onSnapshot, getDocs, setDoc, updateDoc, writeBatch,
   serverTimestamp, Timestamp, runTransaction, getDocsFromServer, increment,
+  deleteDoc, arrayUnion, arrayRemove,
 } = fb;
 const { getStorage, ref: storageRef, uploadBytesResumable, getDownloadURL, deleteObject } = fb.storageMod;
 
@@ -49,6 +50,9 @@ const S = {
   vehicles: [], reservations: [], repairs: [],
   settings: { ...DEFAULT_SETTINGS }, settingsExists: false,
   members: [], membersLoaded: false, // 名簿（日報アプリと同じ形：name / kubun / shozoku / active）
+  notify: {}, notifyLoaded: false, // 通知を届ける人（PCで選ぶ）：{ shaken: [名前…], due: […], overdue: […], repair: […] }
+  prefs: new Map(), // 本人がスマホでオフにした通知：名前 → Set(種類)
+  tokenNames: new Set(), // 通知を許可した端末がある人の名前
   ready: false, error: "",
 };
 
@@ -105,6 +109,7 @@ let ME = lsGet("sharyo_me") || "";
 function saveMe(n) {
   n = String(n || "").trim().slice(0, 40); if (!n) return;
   ME = n; lsSet("sharyo_me", n); resetForm(); meQuery = "";
+  if (pushState() === "on") saveToken(); // この端末の通知を新しい名前にひもづけ直す
   go({ name: "list" });
 }
 
@@ -216,7 +221,7 @@ function applyView() {
   if (ui.view !== "pc") closeModal();
   render();
 }
-function go(s) { ui.screen = s; form.err = ""; render(); $("ph-screen").scrollTop = 0; }
+function go(s) { ui.screen = s; ui.menu = false; form.err = ""; render(); $("ph-screen").scrollTop = 0; }
 function setTab(t) { ui.tab = t; go({ name: "list" }); }
 
 function render() { if (ui.view === "phone") renderPhone(); else renderPc(); loadImages(); }
@@ -263,20 +268,21 @@ function renderPhone() {
   t.hidden = false;
   t.innerHTML = [["cars", "🚐", "車両"], ["shaken", "📋", "車検"], ["repair", "🔧", "修理"]].map(([k, ic, l]) =>
     `<button class="${ui.tab === k ? "on" : ""}" data-act="tab" data-val="${k}"><span class="ic">${ic}</span>${l}${k === "repair" && openCount() ? `<span class="badge">${openCount()}</span>` : ""}</button>`).join("");
-  if (ui.screen.name === "me") {
-    ui.backTo = { name: "list" };
-    h.innerHTML = `<button class="back" data-act="back" aria-label="戻る">‹</button><h1>あなたの名前</h1>`;
-    s.innerHTML = nameScreen(false); return;
+  if (ui.screen.name === "me" || ui.screen.name === "notify") {
+    ui.backTo = { name: "list" }; ui.menu = false;
+    h.innerHTML = `<button class="back" data-act="back" aria-label="戻る">‹</button><h1>${ui.screen.name === "me" ? "あなたの名前" : "🔔 通知"}</h1>`;
+    s.innerHTML = ui.screen.name === "me" ? nameScreen(false) : notifyScreen(); return;
   }
 
   let title = "社用車", back = null, body = "", pill = "";
   const d = today(), sc = ui.screen;
   if (sc.name === "list") {
-    pill = `<button class="me-pill" data-act="meEdit">${esc(ME)}</button>`;
+    pill = `<button class="me-pill" data-act="meMenu" aria-haspopup="menu" aria-expanded="${!!ui.menu}">${esc(ME)}</button>`
+      + (ui.menu ? `<div class="me-menu" role="menu"><button role="menuitem" data-act="meEdit">名前を変える</button><button role="menuitem" data-act="goNotify">🔔 通知</button></div>` : "");
     if (ui.tab === "cars") body = listCars();
     else if (ui.tab === "shaken") { title = "車検"; body = listShaken(); }
     else { title = "修理依頼"; body = listRepairs(); }
-    body = myBar() + body;
+    body = (ui.tab === "cars" ? pushBar() : "") + myBar() + body;
   } else if (sc.name === "done") {
     title = ""; body = doneScreen(sc);
   } else {
@@ -542,6 +548,88 @@ function myBar() {
       <div class="mu-body"><div class="mu-info"><b>${esc(v.kind)}</b><span class="mu-plate">${plateText(v)}</span><span class="mu-to">${dayLabel(r.to)}まで</span></div>
         <button class="mu-btn" data-act="myReturn" data-id="${v.id}" data-val="${r.id}">返却する</button></div></div>`;
   }).join("")}${next ? `<div class="mynext-row"><button class="mynext" data-act="detail" data-id="${next.vehicleId}">次の予約：${rangeText(next)} ${esc(byId(next.vehicleId).kind)}<span>›</span></button>${canCancel(next) ? `<button class="mu-cancel" data-act="cancelRes" data-id="${next.id}">取り消す</button>` : ""}</div>` : ""}</div>`;
+}
+
+/* ---------- プッシュ通知（届く人は PC で選ぶ。本人はスマホでオフにできる） ---------- */
+const NTYPES = [
+  // 種類, PCの列の見出し, いつ, スマホのスイッチ
+  ["shaken", "車検", () => `${alertDays()}日前 8時`, "車検が近い"],
+  ["due", "返却予定日", () => "当日 17時", "今日が返却予定日"],
+  ["overdue", "返却遅れ", () => "翌日 9時", "返却予定を過ぎた"],
+  ["repair", "修理依頼", () => "すぐ", "修理依頼が来た"],
+];
+const TOKEN_KEY = "sharyo_push_token";
+const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const isStandalone = () => navigator.standalone === true || matchMedia("(display-mode: standalone)").matches;
+const prefId = name => encodeURIComponent(name);
+// PC でオンにされている通知（この人の分）と、本人がオフにしたもの
+const adminOn = name => NTYPES.map(t => t[0]).filter(t => (S.notify[t] || []).includes(name));
+const myOff = () => S.prefs.get(ME) || new Set();
+// この端末の通知の状態
+function pushState() {
+  if (!VAPID_KEY) return "off"; // まだ準備できていない（公開鍵が入っていない）
+  if (isIOS && !isStandalone()) return "ios-browser"; // iPhone はホーム画面に追加したときだけ通知が届く
+  if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) return "unsupported";
+  if (Notification.permission === "denied") return "denied";
+  return Notification.permission === "granted" && lsGet(TOKEN_KEY) ? "on" : "ask";
+}
+let messaging = null;
+function getMessagingMod() {
+  if (!messaging) messaging = import(`${SDK}/firebase-messaging.js`)
+    .then(async m => ((await m.isSupported()) ? { m, inst: m.getMessaging(fbApp) } : null))
+    .catch(e => { console.warn(e); messaging = null; return null; });
+  return messaging;
+}
+// この端末の通知トークンを取り、名前とひもづけて保存する（前のトークンは片づける）
+async function saveToken() {
+  const ms = await getMessagingMod(); if (!ms || !ME) return false;
+  await navigator.serviceWorker.register("./sw.js");
+  const reg = await navigator.serviceWorker.ready; // 動き出してからでないとトークンを取れない
+  const token = await ms.m.getToken(ms.inst, { vapidKey: VAPID_KEY, serviceWorkerRegistration: reg });
+  if (!token) return false;
+  const old = lsGet(TOKEN_KEY);
+  setDoc(doc(db, "pushTokens", token), { name: ME, platform: isIOS ? "ios" : (/Android/.test(navigator.userAgent) ? "android" : "pc"), updatedAt: serverTimestamp() })
+    .catch(e => console.warn("通知の端末を保存できません", e));
+  if (old && old !== token) deleteDoc(doc(db, "pushTokens", old)).catch(() => {});
+  lsSet(TOKEN_KEY, token);
+  return true;
+}
+// 「🔔 通知をオンにする」：許可のダイアログを出す（iPhone では押した直後に呼ぶ必要がある）
+function enablePush() {
+  const ask = Notification.permission === "granted" ? Promise.resolve("granted") : Notification.requestPermission();
+  ask.then(async p => {
+    if (p !== "granted") { toast("通知は許可されませんでした"); render(); return; }
+    let ok = false;
+    try { ok = await saveToken(); } catch (e) { console.error(e); }
+    toast(ok ? "通知をオンにしました" : "通知をオンにできませんでした。電波のよい所でもう一度押してください", ok ? "" : "err");
+    render();
+  });
+}
+// 本人のオン・オフ（スマホの「🔔 通知」画面）
+function setMyPref(type, on) {
+  const off = new Set(myOff()); on ? off.delete(type) : off.add(type); S.prefs.set(ME, off); // すぐ画面に出す
+  setDoc(doc(db, "notifyPrefs", prefId(ME)), { name: ME, off: on ? arrayRemove(type) : arrayUnion(type), updatedAt: serverTimestamp() }, { merge: true })
+    .catch(e => { console.error(e); toast("変更できませんでした。もう一度お試しください", "err"); });
+}
+// 車両一覧のいちばん上：PC でオンにされているのに、この端末でまだ許可していない人に出す
+function pushBar() {
+  if (!S.notifyLoaded || !adminOn(ME).some(t => !myOff().has(t))) return "";
+  const st = pushState();
+  if (st === "ask") return `<button class="pushbtn" data-act="pushOn">🔔 通知をオンにする</button>`;
+  if (st === "ios-browser") return `<p class="pushnote">ホーム画面に追加すると通知が届きます</p>`;
+  return "";
+}
+function notifyScreen() {
+  const types = NTYPES.filter(t => adminOn(ME).includes(t[0]));
+  if (!S.notifyLoaded) return `<div class="loading">読み込み中…</div>`;
+  if (!types.length) return `<div class="empty">届く通知はありません</div>`;
+  const st = pushState(), off = myOff();
+  const top = st === "ask" ? `<button class="pushbtn" data-act="pushOn">🔔 通知をオンにする</button>`
+    : st === "ios-browser" ? `<p class="pushnote">ホーム画面に追加すると通知が届きます</p>`
+    : st === "denied" ? `<p class="pushnote">この端末では通知が止められています。端末の設定で許可してください</p>`
+    : st === "unsupported" ? `<p class="pushnote">この端末では通知を使えません</p>` : "";
+  return top + `<div class="nsw">${types.map(([k, , , label]) => `
+    <label class="nsw-row"><span>${label}</span><input type="checkbox" role="switch" class="switch-in" data-pref="${k}"${off.has(k) ? "" : " checked"}></label>`).join("")}</div>`;
 }
 
 /* ---------- 返却 ---------- */
@@ -972,7 +1060,14 @@ function openSettings() {
   modalId = null;
   $("modal").innerHTML = `<div class="overlay"><form class="modal panel" id="sform" novalidate>
     <h2>設定<button type="button" class="x" data-act="close" aria-label="閉じる">×</button></h2>
-    <div class="mbody">
+    <div class="stabs" role="tablist">${[["basic", "基本"], ["notify", "通知"]].map(([k, l]) =>
+      `<button type="button" role="tab" class="${setTabNow === k ? "on" : ""}" data-act="setTab" data-val="${k}" aria-selected="${setTabNow === k}">${l}</button>`).join("")}</div>
+    <div class="mbody" id="s-notify"${setTabNow === "notify" ? "" : " hidden"}>
+      <div class="mtools"><input type="search" id="nSearch" placeholder="名前で探す" value="${esc(nQuery)}" autocomplete="off" aria-label="名前で探す"></div>
+      <div class="hint">オンにした人のスマホに届きます（最初は全員オフ）。返却予定日・返却遅れは、本人の予約の分だけ届きます。押したときにすぐ保存されます</div>
+      <div id="ntable" class="ntable-wrap"></div>
+    </div>
+    <div class="mbody" id="s-basic"${setTabNow === "basic" ? "" : " hidden"}>
       <p class="ferr" id="ferr" hidden></p>
       <div class="field"><label>名簿</label>
         <div class="mtools">
@@ -998,12 +1093,51 @@ function openSettings() {
         <div class="hint">スマホの車両カードに「🔔 車検」が出始める日数です（はじめは30日）</div></div>
     </div>
     <div class="mfoot"><span class="sp"></span>
-      <button type="button" class="btn ghost" data-act="close">やめる</button>
-      <button type="submit" class="btn primary">保存する</button>
+      <button type="button" class="btn ghost" data-act="close" id="s-cancel">${setTabNow === "notify" ? "閉じる" : "やめる"}</button>
+      <button type="submit" class="btn primary" id="s-save"${setTabNow === "notify" ? " hidden" : ""}>保存する</button>
     </div>
   </form></div>`;
   $("modal").hidden = false;
   renderMemberList();
+  renderNotifyTable();
+}
+// 設定のタブ（基本・通知）。入力中の内容が消えないよう、描き直さずに切り替える
+let setTabNow = "basic";
+function showSetTab(k) {
+  setTabNow = k;
+  document.querySelectorAll(".stabs [data-act=setTab]").forEach(b => { b.classList.toggle("on", b.dataset.val === k); b.setAttribute("aria-selected", b.dataset.val === k); });
+  $("s-basic").hidden = k !== "basic"; $("s-notify").hidden = k !== "notify";
+  $("s-save").hidden = k === "notify"; $("s-cancel").textContent = k === "notify" ? "閉じる" : "やめる";
+}
+
+// 設定 → 通知：名簿の人が行、4つの通知が列。チェックでオン・オフ（すぐ保存）
+let nQuery = "";
+const nVisible = () => { const q = nQuery.trim(); return activeMembers().filter(m => !q || m.name.includes(q)); };
+function renderNotifyTable() {
+  const el = $("ntable"); if (!el) return;
+  const list = nVisible();
+  if (!activeMembers().length) { el.innerHTML = `<div class="empty">名簿がまだありません。「基本」タブで名簿を取り込んでください</div>`; return; }
+  const rows = MGROUPS.map(g => {
+    const ms = list.filter(m => mGroupOf(m) === g).sort((a, b) => byLen(a.name, b.name));
+    return !ms.length ? "" : `<tr class="ngrp"><td colspan="5">${g}</td></tr>` + ms.map(m => `<tr>
+      <td class="nname"><b>${esc(m.name)}</b><small class="pst${S.tokenNames.has(m.name) ? " ok" : ""}">${S.tokenNames.has(m.name) ? "スマホ許可済み" : "未許可"}</small></td>
+      ${NTYPES.map(([k, l]) => `<td><input type="checkbox" data-ntype="${k}" data-name="${esc(m.name)}"${(S.notify[k] || []).includes(m.name) ? " checked" : ""} aria-label="${esc(m.name)} ${l}"></td>`).join("")}</tr>`).join("");
+  }).join("");
+  el.innerHTML = `<table class="ntable"><thead><tr><th>名前</th>${NTYPES.map(([k, l, when]) =>
+    `<th>${l}<small>${when()}</small><div class="nall"><button type="button" class="btn ghost small" data-act="nAll" data-val="${k}" data-id="on">全員オン</button><button type="button" class="btn ghost small" data-act="nAll" data-val="${k}" data-id="off">全員オフ</button></div></th>`).join("")}</tr></thead>
+    <tbody>${rows || `<tr><td colspan="5"><div class="empty">該当する名前がありません</div></td></tr>`}</tbody></table>`;
+}
+function setNotify(type, names, on) {
+  if (!names.length) return;
+  setDoc(doc(db, "settings", "notify"), { [type]: on ? arrayUnion(...names) : arrayRemove(...names), updatedAt: serverTimestamp() }, { merge: true })
+    .catch(e => { console.error(e); toast("変更できませんでした。もう一度お試しください", "err"); });
+}
+// 列ごとの「全員オン」「全員オフ」（名前で探しているときは、出ている人だけ）
+function setNotifyAll(type, on) {
+  const names = nVisible().map(m => m.name);
+  const label = NTYPES.find(t => t[0] === type)[1];
+  if (!confirm(`「${label}」の通知を、${nQuery.trim() ? `表示している ${names.length}人` : `全員（${names.length}人）`}${on ? "オン" : "オフ"}にしますか？`)) return;
+  setNotify(type, names, on);
 }
 
 let memQuery = "";
@@ -1349,9 +1483,17 @@ function toast(msg, kind) {
 
 /* ---------- 操作 ---------- */
 document.addEventListener("click", e => {
-  const el = e.target.closest("[data-act]"); if (!el) return;
+  const el = e.target.closest("[data-act]");
+  // 名前のメニューは、ほかの所を押したら閉じるだけ（押した所の動きはしない）
+  if (ui.menu && !e.target.closest(".me-menu, .me-pill")) { ui.menu = false; render(); return; }
+  if (!el) return;
   const { act, id, val } = el.dataset;
   switch (act) {
+    case "meMenu": ui.menu = !ui.menu; render(); break;
+    case "goNotify": go({ name: "notify" }); break;
+    case "pushOn": enablePush(); break;
+    case "setTab": showSetTab(val); break;
+    case "nAll": setNotifyAll(val, id === "on"); break;
     case "view": lsSet("sharyo_view", val); applyView(); break;
     case "tab": setTab(val); break;
     case "filter": ui.filter = val; render(); break;
@@ -1405,12 +1547,17 @@ document.addEventListener("change", e => {
     if (f) setVehiclePhoto(el.dataset.photo, f);
   }
   if (el.id === "f-photo") pickFormPhoto(el); // PCの登録フォーム（保存を押したときに送る）
+  if (el.dataset && el.dataset.ntype) setNotify(el.dataset.ntype, [el.dataset.name], el.checked); // PCの設定 → 通知
+  if (el.dataset && el.dataset.pref) setMyPref(el.dataset.pref, el.checked); // スマホの「🔔 通知」
 });
-// 設定画面：名簿の検索、追加欄で Enter を押したとき
-document.addEventListener("input", e => { if (e.target.id === "memSearch") { memQuery = e.target.value; renderMemberList(); } });
+// 設定画面：名簿・通知の検索、追加欄で Enter を押したとき
+document.addEventListener("input", e => {
+  if (e.target.id === "memSearch") { memQuery = e.target.value; renderMemberList(); }
+  if (e.target.id === "nSearch") { nQuery = e.target.value; renderNotifyTable(); }
+});
 document.addEventListener("keydown", e => {
   if (e.key !== "Enter" || !e.target.id) return;
-  if (e.target.id === "memSearch") e.preventDefault();
+  if (e.target.id === "memSearch" || e.target.id === "nSearch") e.preventDefault();
   if (/^madd-/.test(e.target.id)) { e.preventDefault(); addMember(); }
 });
 document.addEventListener("submit", e => {
@@ -1480,6 +1627,17 @@ function startSync() {
     S.settings = { ...DEFAULT_SETTINGS, ...(d.data() || {}) };
     refresh();
   }, onErr);
+  // 通知：届ける人（PC）・本人のオフ（スマホ）・許可した端末がある人
+  const nwarn = e => console.warn("通知の設定を読めません", e);
+  onSnapshot(doc(db, "settings", "notify"), d => { S.notify = d.data() || {}; S.notifyLoaded = true; refresh(); renderNotifyTable(); }, nwarn);
+  onSnapshot(collection(db, "notifyPrefs"), snap => {
+    S.prefs = new Map(snap.docs.map(d => [d.get("name"), new Set(d.get("off") || [])])); refresh();
+  }, nwarn);
+  onSnapshot(collection(db, "pushTokens"), snap => {
+    S.tokenNames = new Set(snap.docs.map(d => d.get("name")).filter(Boolean)); renderNotifyTable();
+  }, nwarn);
+  // 許可済みの端末は、開くたびにトークンを取り直して保存する（変わっていたり、無効として消されていても戻る）
+  if (ME && pushState() === "on") saveToken().catch(e => console.warn(e));
 }
 
 applyView();

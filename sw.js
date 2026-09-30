@@ -4,7 +4,8 @@
 // - 車・修理の写真（Firebase Storage）は、一度表示したら端末に保存して次からはそこから出す（最大200枚、古い順に消す）
 //   写真を変えると写真のアドレスが変わるので、新しい写真は自動で取りに行く
 // - データ（Firestore）は Firebase が自分で処理するので、ここでは触らない
-const CACHE = "sharyo-v8"; // 版を上げると、スマホに保存した古い画面・アイコンを入れ替える
+// - プッシュ通知（Cloud Functions から Firebase Cloud Messaging で届く）を表示し、押したらアプリを開く
+const CACHE = "sharyo-v9"; // 版を上げると、スマホに保存した古い画面・アイコンを入れ替える
 const PHOTO_CACHE = "sharyo-photos-v1", PHOTO_MAX_ITEMS = 200; // 写真の置き場（画面の版を上げても消さない）
 const SHELL = [
   "./", "./index.html", "./style.css", "./app.js", "./firebase-config.js", "./manifest.webmanifest",
@@ -57,4 +58,26 @@ self.addEventListener("fetch", e => {
       }))
     );
   }
+});
+
+// プッシュ通知：届いたら表示する（中身は data の title / body / tag / url）
+self.addEventListener("push", e => {
+  let p = {};
+  try { p = e.data ? e.data.json() : {}; } catch (err) { p = { data: { body: e.data ? e.data.text() : "" } }; }
+  const d = { ...(p.notification || {}), ...(p.data || {}) };
+  e.waitUntil(self.registration.showNotification(d.title || "社用車", {
+    body: d.body || "",
+    tag: d.tag || undefined, // 同じ通知は重ねない
+    icon: "./icons/icon-192.png?v=2",
+    data: { url: d.url || "./" },
+  }));
+});
+// 通知を押したら：開いているアプリがあればそれを前に、なければ開く
+self.addEventListener("notificationclick", e => {
+  e.notification.close();
+  const url = new URL((e.notification.data && e.notification.data.url) || "./", self.registration.scope).href;
+  e.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(list => {
+    const open = list.find(c => c.url.startsWith(self.registration.scope) && "focus" in c);
+    return open ? open.focus() : self.clients.openWindow(url);
+  }));
 });

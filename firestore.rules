@@ -108,10 +108,40 @@ service cloud.firestore {
         && (!('lots' in d) || (d.lots is list && d.lots.size() >= 1 && d.lots.size() <= 5))
         && (!('shakenAlertDays' in d) || (d.shakenAlertDays is int && d.shakenAlertDays >= 1 && d.shakenAlertDays <= 365));
     }
+    // 通知を届ける人（PCの設定 → 通知）：通知の種類ごとに名前のリスト
+    function nameList(d, k) {
+      return !(k in d) || (d[k] is list && d[k].size() <= 500);
+    }
+    function validNotify(d) {
+      return d.keys().hasOnly(['shaken', 'due', 'overdue', 'repair', 'updatedAt'])
+        && nameList(d, 'shaken') && nameList(d, 'due') && nameList(d, 'overdue') && nameList(d, 'repair');
+    }
     match /settings/{docId} {
       allow read: if signedIn();
-      allow create, update: if signedIn() && docId == 'app' && validSettings(request.resource.data);
+      allow create, update: if signedIn() && (
+        (docId == 'app' && validSettings(request.resource.data))
+        || (docId == 'notify' && validNotify(request.resource.data)));
     }
+
+    // ---- プッシュ通知 ----
+    // 本人がスマホでオフにした通知（off に入っている種類は届かない）
+    match /notifyPrefs/{prefId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn()
+        && request.resource.data.keys().hasOnly(['name', 'off', 'updatedAt'])
+        && str(request.resource.data.name, 40)
+        && request.resource.data.off is list && request.resource.data.off.size() <= 4;
+    }
+    // 通知を許可した端末（ID が通知トークン）。名前とひもづける。1人が複数の端末でもよい
+    match /pushTokens/{token} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && token.size() <= 1000
+        && request.resource.data.keys().hasOnly(['name', 'platform', 'updatedAt'])
+        && str(request.resource.data.name, 40)
+        && optStr(request.resource.data, 'platform', 20);
+      allow delete: if signedIn();
+    }
+    // notifyLog（送った記録）は Cloud Functions だけが読み書きする
 
     // それ以外はすべて禁止
   }
