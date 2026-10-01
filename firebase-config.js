@@ -11,4 +11,4 @@ export const firebaseConfig = {
 export const FIREBASE_SDK_VERSION = "12.19.0";
 // プッシュ通知の公開鍵（Firebase コンソール → プロジェクトの設定 → Cloud Messaging → ウェブプッシュ証明書 の「鍵ペア」）
 // 空のあいだは通知の機能を出さない
-export const VAPID_KEY = "";
+export const VAPID_KEY = "BLsNBzFLlGWbLTvT_Xg-cDkGL78xO9ONDxckH2B8wBQH1fk45Zu8757myO_zs_GLdSeBKolNo0cHZtOhSuHmvWA";
