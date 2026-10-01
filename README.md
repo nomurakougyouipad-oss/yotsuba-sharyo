@@ -186,7 +186,7 @@ members/{memberId}             // 名簿（日報アプリの master/workers か
   createdAt, updatedAt
 
 settings/app
-  people: ["野村","田中",...]   // 旧：名前リスト。名簿（members）が空のときだけ自社として使う
+  people: [...]                  // 旧：名前リスト。今は使わない（名前は名簿 members だけ）
   sites: ["東レ 定修","太陽石油",...]
   lots: ["本社","松前工場","伊予工場"]
   shakenAlertDays: 30

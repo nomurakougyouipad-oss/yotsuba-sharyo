@@ -38,7 +38,6 @@ const storage = getStorage(fbApp);
 const TYPES = ["トラック", "バン", "普通車"];
 const LABEL = { free: "空き", use: "使用中", fix: "修理中", own: "専用", insp: "車検中" };
 const DEFAULT_SETTINGS = {
-  people: ["野村", "田中", "佐藤", "山本", "鈴木", "高橋"],
   sites: ["東レ 定修", "太陽石油", "黒藤川発電所", "熊本 浄化センター", "松前工場 内作"],
   lots: ["本社", "松前工場", "伊予工場"],
   shakenAlertDays: 30,
@@ -83,14 +82,11 @@ const MGROUPS = ["自社", "常駐協力", "外注協力"];
 const mGroupOf = w => (!w || w.kubun === "自社") ? "自社" : (w.kubun === "外注協力" ? "外注協力" : "常駐協力");
 const isKana = x => /^[ァ-ヴー]+$/.test(x);
 const byLen = (a, b) => (isKana(a) - isKana(b)) || (a.length - b.length) || a.localeCompare(b, "ja");
-// 名簿がまだ空のときは、これまでの「名前リスト」を自社として使う
-function roster() {
-  if (S.members.length) return S.members;
-  return (S.settings.people || []).map(name => ({ id: "", name, kubun: "自社", shozoku: "", active: true }));
-}
-const activeMembers = () => roster().filter(m => m.active !== false);
+const activeMembers = () => S.members.filter(m => m.active !== false);
 // 区分ごとに分けた名前のボタン（日報アプリと同じ並び）。act は押したときの動き
 function nameChips(q, selected, act) {
+  // 名簿が届くまでは名前のボタンを出さない
+  if (!S.membersLoaded) return `<div class="loading">読み込み中…</div>`;
   q = String(q || "").trim();
   let html = "";
   MGROUPS.forEach(g => {
@@ -100,7 +96,6 @@ function nameChips(q, selected, act) {
       `<button class="nchip${selected === n ? " on" : ""}" data-act="${act}" data-val="${esc(n)}">${esc(n)}</button>`).join("")}</div>`;
   });
   if (html) return html;
-  if (!S.membersLoaded && !S.settings.people) return `<div class="loading">名簿を読み込んでいます…</div>`;
   return `<div class="empty">${q ? "該当する名前がありません" : "名簿がまだありません。事務所のPCで名簿を取り込んでください"}</div>`;
 }
 
@@ -272,7 +267,7 @@ function refresh() {
 function renderPhone() {
   const h = $("ph-header"), s = $("ph-screen"), t = $("ph-tabs");
   // 初回は名前を選んでもらう
-  if (!ME) { h.innerHTML = `<h1>はじめに</h1>`; s.innerHTML = errBar() + nameScreen(true); t.hidden = true; return; }
+  if (!ME) { h.innerHTML = S.membersLoaded ? `<h1>はじめに</h1>` : `<h1>社用車</h1>`; s.innerHTML = errBar() + nameScreen(true); t.hidden = true; return; }
   t.hidden = false;
   t.innerHTML = [["cars", "🚐", "車両"], ["shaken", "📋", "車検"], ["repair", "🔧", "修理"]].map(([k, ic, l]) =>
     `<button class="${ui.tab === k ? "on" : ""}" data-act="tab" data-val="${k}"><span class="ic">${ic}</span>${l}${k === "repair" && openCount() ? `<span class="badge">${openCount()}</span>` : ""}</button>`).join("");
@@ -309,6 +304,7 @@ function renderPhone() {
 
 let meQuery = "";
 function nameScreen(first) {
+  if (!S.membersLoaded) return `<div class="loading">読み込み中…</div>`; // 名簿が届くまでは「読み込み中…」だけ
   return `<div class="welcome">${first
     ? `<h2>あなたの名前を選んでください</h2><p class="sub" style="margin:0 0 14px">このスマホに覚えておきます。予約するとき自動で入ります</p>`
     : `<p class="sub" style="margin:0 0 14px">今は「${esc(ME)}」です。変えるなら選んでください</p>`}
