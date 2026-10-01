@@ -36,7 +36,7 @@ const storage = getStorage(fbApp);
 
 /* ---------- 定数 ---------- */
 const TYPES = ["トラック", "バン", "普通車"];
-const LABEL = { free: "空き", use: "使用中", fix: "修理中", own: "専用" };
+const LABEL = { free: "空き", use: "使用中", fix: "修理中", own: "専用", insp: "車検中" };
 const DEFAULT_SETTINGS = {
   people: ["野村", "田中", "佐藤", "山本", "鈴木", "高橋"],
   sites: ["東レ 定修", "太陽石油", "黒藤川発電所", "熊本 浄化センター", "松前工場 内作"],
@@ -129,7 +129,8 @@ function nextRes(v) {
   const t = ymd(today());
   return S.reservations.filter(r => r.vehicleId === v.id && !r.returnedAt && r.from > t).sort((a, b) => (a.from > b.from ? 1 : -1))[0] || null;
 }
-function status(v) { return fixRepair(v) ? "fix" : (currentUse(v) ? "use" : "free"); }
+// 優先順：車検中 → 修理中 → 使用中 → 空き（廃車は一覧に出さない）
+function status(v) { return v.inspection ? "insp" : fixRepair(v) ? "fix" : (currentUse(v) ? "use" : "free"); }
 function repairText(r) { const s = (r.symptoms || []).join("・"); return s && r.memo ? `${s}：${r.memo}` : (s || r.memo || ""); }
 const lotOf = v => v.currentLot || v.homeLot || "";
 const alertDays = () => Number(S.settings.shakenAlertDays) || 30;
@@ -170,6 +171,9 @@ function statusView(v, st, use) {
   return { cls: st, label: LABEL[st] };
 }
 
+// 車検中の期間の文字（例：10/1〜（戻り予定 10/4））
+const inspText = x => `${fmt(x.from)}〜${x.until ? `（戻り予定 ${fmt(x.until)}）` : ""}`;
+
 /* ---------- 部品（試作と同じ見た目） ---------- */
 function carColor(v) { let h = 0; for (const c of v.id) h = (h * 31 + c.charCodeAt(0)) >>> 0; return CAR_COLORS[h % CAR_COLORS.length]; }
 function carSvg(color) {
@@ -193,12 +197,15 @@ function plateHtml(v, small) {
 }
 function shakenClass(v) { const d = daysTo(v.shakenDate); return d < 0 ? "over" : (d <= alertDays() ? "soon" : ""); }
 function shakenTag(v) {
-  const d = daysTo(v.shakenDate); if (d > alertDays()) return "";
+  const d = daysTo(v.shakenDate); if (d > alertDays() || v.inspection) return "";
   return `<span class="shk ${d < 0 ? "over" : ""}"><span>🔔 車検</span><b>${d < 0 ? `${-d}日超過` : (d === 0 ? "今日" : `あと${d}日`)}</b></span>`;
 }
+// 車検の残り日数の札（車検に出している車は「車検中」）
+const shakenDays = (v, attr = "") => (v.inspection ? `<span class="days insp"${attr}>車検中</span>` : `<span class="days ${shakenClass(v)}"${attr}>${shakenText(v)}</span>`);
 const byShaken = list => [...list].sort((a, b) => (a.shakenDate > b.shakenDate ? 1 : -1));
 function shakenText(v) { const d = daysTo(v.shakenDate); return d < 0 ? `${-d}日 超過` : (d === 0 ? "今日" : `あと ${d}日`); }
 function bandExtra(v, st, use) {
+  if (st === "insp") return `<span class="period">${inspText(v.inspection)}</span>`;
   if (use && isOverdue(use)) return `<span class="period">返却予定を過ぎています</span>`;
   if (use) return `<span class="period">${fmt(use.from)}〜${fmt(use.to)}</span>`;
   const next = nextRes(v);
@@ -206,6 +213,7 @@ function bandExtra(v, st, use) {
   return "";
 }
 function useText(v, use, fix) {
+  if (v.inspection) return "車検に出しています";
   return use ? `${esc(use.who)}さん → ${esc(use.site)}` : (fix ? `修理待ち：${esc(repairText(fix))}` : `${esc(lotOf(v))} にあります`);
 }
 const errBar = () => (S.error ? `<div class="errbar">${esc(S.error)}</div>` : "");
@@ -315,7 +323,7 @@ function listShaken() {
   return `<p class="sub" style="margin-top:0">期限が近い順</p>` + vs.map(v => `
   <div class="li tap" data-act="detail" data-id="${v.id}" role="button" tabindex="0">
     ${plateHtml(v, true)}<div class="grow"><div class="t">${esc(v.kind)}</div><div class="s">${jp(v.shakenDate)}</div></div>
-    <span class="days ${shakenClass(v)}">${shakenText(v)}</span></div>`).join("");
+    ${shakenDays(v)}</div>`).join("");
 }
 
 function listCars() {
@@ -345,19 +353,22 @@ function listCars() {
 }
 
 function detail(v) {
-  const st = status(v), use = currentUse(v), fix = fixRepair(v);
+  const st = status(v), fix = fixRepair(v), insp = st === "insp";
+  const use = insp ? null : currentUse(v); // 車検中は、使っている人・置いてある場所を出さない
   const rows = [
-    ["状態", `<span class="status-pill ${statusView(v, st, use).cls}">${esc(statusView(v, st, use).label)}</span>`],
+    ["状態", `<span class="status-pill ${statusView(v, st, use).cls}">${esc(statusView(v, st, use).label)}</span>${insp ? `<div class="insnote">${inspText(v.inspection)}</div>` : ""}`],
     use ? ["使っている人", esc(use.who) + "さん"] : null,
     use ? ["現場", esc(use.site)] : null,
     use ? ["いつまで", isOverdue(use) ? `<span class="warn">${fmt(use.to)} まで（返却予定を過ぎています）</span>` : `${fmt(use.to)} まで`] : null,
-    !use ? ["置いてある場所", esc(lotOf(v))] : null,
+    !use && !insp ? ["置いてある場所", esc(lotOf(v))] : null,
     fix ? ["修理", `<span class="warn">${esc(repairText(fix))}</span>`] : null,
-    ["車検", `<span class="${shakenClass(v) ? "warn" : ""}">${jp(v.shakenDate)}（${shakenText(v)}）</span>`],
+    [insp ? "車検満了日" : "車検", `<span class="${shakenClass(v) ? "warn" : ""}">${jp(v.shakenDate)}（${shakenText(v)}）</span>`],
     v.owner ? ["専用", `${esc(v.owner)}さん専用`] : null,
     licOf(v) !== "普通" ? ["必要な免許", `${licOf(v)}以上<div class="licnote">${esc(LICENSE_NOTE[licOf(v)])}</div>`] : null,
   ].filter(Boolean);
-  const actions = st === "use"
+  const actions = insp
+    ? `<button class="btn primary" disabled>この車を予約する</button><p class="ownnote">車検中のため予約できません</p>`
+    : st === "use"
     ? `<button class="btn primary" data-act="goto" data-val="return" data-id="${v.id}">返却する</button>`
     : (st === "free" ? (canReserve(v) ? `<button class="btn primary" data-act="goto" data-val="reserve" data-id="${v.id}">この車を予約する</button>`
       : `<p class="ownnote">この車は${esc(v.owner)}さん専用です</p>`) : "");
@@ -409,6 +420,14 @@ const clashMsg = r => (effTo(r) !== r.to
   ? `この車は返却予定（${fmt(r.to)}）を過ぎて、まだ返却されていません（${r.who}さん）。返却されるまで予約できません`
   : `その日は予約が入っています：${fmt(r.from)}〜${fmt(r.to)} ${r.who}さん（${r.site}）`);
 class ClashError extends Error {}
+// 車検中で予約できない日：出した日〜戻り予定日（戻り予定を過ぎても戻していなければ今日まで）。戻り予定日がなければ今日だけ
+function inspBlock(v) {
+  const x = v && v.inspection; if (!x) return null;
+  const t = ymd(today());
+  return x.until ? { from: x.from, to: x.until > t ? x.until : t } : { from: t, to: t };
+}
+const inspClash = (v, from, to) => { const b = inspBlock(v); return !!b && from <= b.to && b.from <= to; };
+const inspMsg = v => `この車は車検中です${v.inspection.until ? `（戻り予定 ${fmt(v.inspection.until)}）` : ""}。その日は予約できません`;
 const rangeText = r => (r.from === r.to ? fmt(r.from) : `${fmt(r.from)}〜${fmt(r.to)}`);
 // 取り消せるのは、まだ始まっていない予約。スマホは予約した本人（使う人か予約した人）、PC（広い画面）は全部
 const canCancel = r => r.from > ymd(today()) && (wide.matches || (!!ME && (r.who === ME || r.createdBy === ME)));
@@ -434,6 +453,8 @@ function toRanges(days) {
 // この車で、もう予約・使用中の日（返却待ちは返却されるまでずっと）
 function takenDays(vid) {
   const set = new Set(), limit = ymd(addDays(today(), 400));
+  const b = inspBlock(byId(vid));
+  if (b) for (let d = parse(b.from); ymd(d) <= b.to && ymd(d) <= limit; d.setDate(d.getDate() + 1)) set.add(ymd(d));
   S.reservations.filter(r => r.vehicleId === vid && !r.returnedAt).forEach(r => {
     const end = isOverdue(r) ? limit : r.to;
     for (let d = parse(r.from); ymd(d) <= end && ymd(d) <= limit; d.setDate(d.getDate() + 1)) set.add(ymd(d));
@@ -498,6 +519,7 @@ async function doReserve(v) {
   if (!ranges.length) err = "予約する日を選んでください";
   else if (ranges[0].from < t) err = "過ぎた日は予約できません";
   else if (!who || !site) err = "使う人と現場を選んでください";
+  else if (ranges.some(g => inspClash(v, g.from, g.to))) err = inspMsg(v);
   else { for (const g of ranges) { const c = findClash(S.reservations, v.id, g.from, g.to); if (c) { err = clashMsg(c); break; } } }
   if (err) { form.err = err; render(); return; }
 
@@ -509,6 +531,8 @@ async function doReserve(v) {
       const vref = doc(db, "vehicles", v.id);
       const vs = await tx.get(vref);
       if (!vs.exists() || vs.data().retired) throw new ClashError("この車は予約できません");
+      const cur = vs.data();
+      if (ranges.some(g => inspClash(cur, g.from, g.to))) throw new ClashError(inspMsg(cur));
       const snap = await getDocsFromServer(query(collection(db, "reservations"), where("vehicleId", "==", v.id), where("returnedAt", "==", null)));
       const list = snap.docs.map(d => d.data());
       for (const g of ranges) { const c = findClash(list, v.id, g.from, g.to); if (c) throw new ClashError(clashMsg(c)); }
@@ -749,12 +773,12 @@ function doneScreen(sc) {
 /* ================= PC版ダッシュボード ================= */
 /* ---------- PC の表示の状態（絞り込み・グループの開閉・パネルの開閉。開き直しても覚えておく） ---------- */
 const pcUi = (() => {
-  const def = { filter: "all", type: "all", groups: { use: true, free: false, own: false, fix: true }, panels: { shaken: false, repair: false, future: false } };
+  const def = { filter: "all", type: "all", groups: { use: true, free: false, own: false, fix: true, insp: true }, panels: { shaken: false, repair: false, future: false } };
   let p = {}; try { p = JSON.parse(lsGet("sharyo_pc_ui") || "{}") || {}; } catch (e) { p = {}; }
   return { filter: p.filter || def.filter, type: p.type || def.type, groups: { ...def.groups, ...(p.groups || {}) }, panels: { ...def.panels, ...(p.panels || {}) } };
 })();
 const savePcUi = () => lsSet("sharyo_pc_ui", JSON.stringify(pcUi));
-const PC_FILTERS = [["all", "全部"], ["free", "空き"], ["use", "使用中"], ["fix", "修理中"], ["own", "専用"]];
+const PC_FILTERS = [["all", "全部"], ["free", "空き"], ["use", "使用中"], ["fix", "修理中"], ["insp", "車検中"], ["own", "専用"]];
 const PANEL_LIMIT = 3;
 // パネルの中身を3件まで出し、残りは「＋ ほか○台を表示」で開く
 function foldList(key, items, unit) {
@@ -778,25 +802,25 @@ function renderPc() {
     !S.vehicles.length ? `<div style="margin-top:12px"><button class="btn ghost small" data-act="seed">サンプルデータ（8台）を入れて試す</button></div>` : ""}</div>`;
   else {
     const typeOK = v => pcUi.type === "all" || v.type === pcUi.type;
-    const stOK = v => pcUi.filter === "fix" ? status(v) === "fix" : matchFilter(v, pcUi.filter);
+    const stOK = v => (["fix", "insp"].includes(pcUi.filter) ? status(v) === pcUi.filter : matchFilter(v, pcUi.filter));
     const byType = vs.filter(typeOK), list = byType.filter(stOK);
-    const n1 = k => byType.filter(v => k === "fix" ? status(v) === "fix" : matchFilter(v, k)).length;
+    const n1 = k => byType.filter(v => (["fix", "insp"].includes(k) ? status(v) === k : matchFilter(v, k))).length;
     const n2 = t => vs.filter(v => (t === "all" || v.type === t) && stOK(v)).length;
-    const tabs = `<div class="pcfilter"><div class="chips five">${PC_FILTERS.map(([k, l]) =>
+    const tabs = `<div class="pcfilter"><div class="chips six">${PC_FILTERS.map(([k, l]) =>
       `<button class="chip ${pcUi.filter === k ? "on" : ""}" data-act="pcFilter" data-val="${k}">${l}<span class="n">${n1(k)}</span></button>`).join("")}</div>
       <div class="chips types four">${[["all", "全種類"], ...TYPES.map(t => [t, t])].map(([k, l]) =>
       `<button class="chip ${pcUi.type === k ? "on" : ""}" data-act="pcType" data-val="${k}">${l}<span class="n">${n2(k)}</span></button>`).join("")}</div></div>`;
     table = tabs + (!list.length ? `<div class="empty">この条件の車はありません</div>` : `<table class="table"><thead><tr><th>状態</th><th>写真</th><th>ナンバー</th><th>車種</th><th>使っている人</th><th>現場</th><th>置き場所</th><th>車検</th></tr></thead><tbody>
-      ${["use", "free", "own", "fix"].map(g => {
+      ${["use", "free", "own", "fix", "insp"].map(g => {
         const rows = list.filter(v => groupOf(v) === g); if (!rows.length) return "";
         const open = !!pcUi.groups[g];
         return `<tr class="grp ${g}${open ? "" : " closed"}" data-act="pcGroup" data-val="${g}" tabindex="0" role="button" aria-expanded="${open}" title="押すと${open ? "閉じます" : "開きます"}"><td colspan="8"><span class="caret">${open ? "▼" : "▶"}</span>${LABEL[g]}<span>${rows.length}台</span>${g === "use" && rows.some(v => isOverdue(currentUse(v))) ? `<span class="tag overdue">うち返却待ち ${rows.filter(v => isOverdue(currentUse(v))).length}台</span>` : ""}</td></tr>` + (!open ? "" : rows.map(v => {
-          const use = currentUse(v), over = isOverdue(use);
+          const insp = g === "insp", use = insp ? null : currentUse(v), over = isOverdue(use);
           return `<tr class="vrow ${g}${over ? " over" : ""}" data-act="edit" data-id="${v.id}" title="押すと修正できます">
         <td class="st"><span class="dot ${g}"></span>${LABEL[g]}${over ? '<div><span class="tag overdue">返却待ち</span></div>' : ""}</td>
         <td>${thumbHtml(v, false, true)}</td><td>${plateHtml(v, true)}</td><td class="kind">${esc(v.kind)}${vehicleTags(v)}</td>
-        <td>${use ? esc(use.who) : "—"}</td><td>${use ? `${esc(use.site)}<div class="s${over ? " overdue-s" : ""}" style="font-size:12px">${fmt(use.from)}〜${fmt(use.to)}${over ? "（返却予定を過ぎています）" : ""}</div>` : "—"}</td>
-        <td>${use ? "—" : esc(lotOf(v))}</td><td><span class="days ${shakenClass(v)}" style="font-size:13px">${shakenText(v)}</span></td></tr>`;
+        <td>${use ? esc(use.who) : "—"}</td><td>${use ? `${esc(use.site)}<div class="s${over ? " overdue-s" : ""}" style="font-size:12px">${fmt(use.from)}〜${fmt(use.to)}${over ? "（返却予定を過ぎています）" : ""}</div>` : insp ? `車検<div class="s" style="font-size:12px">${inspText(v.inspection)}</div>` : "—"}</td>
+        <td>${use || insp ? "—" : esc(lotOf(v))}</td><td>${shakenDays(v, ' style="font-size:13px"')}</td></tr>`;
         }).join(""));
       }).join("")}
       </tbody></table>`);
@@ -804,7 +828,7 @@ function renderPc() {
 
   $("pc").innerHTML = `
   <div class="top"><h1>社用車 今日の状況</h1><span class="today">${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日（${DOW[d.getDay()]}）</span>
-    <div class="counts"><div class="count free">${n("free")}<span>空き</span></div><div class="count use">${n("use")}<span>使用中</span></div><div class="count fix">${n("fix")}<span>修理中</span></div></div>
+    <div class="counts"><div class="count free">${n("free")}<span>空き</span></div><div class="count use">${n("use")}<span>使用中</span></div><div class="count fix">${n("fix")}<span>修理中</span></div><div class="count insp">${n("insp")}<span>車検中</span></div></div>
     <button class="btn ghost small" data-act="settings">⚙ 設定</button></div>
   ${errBar()}
   <div class="grid2">
@@ -950,7 +974,7 @@ function shakenPanel() {
   const soon = byShaken(shown().filter(v => daysTo(v.shakenDate) <= lim));
   const f = foldList("shaken", soon, "台");
   return `<div class="panel"><h2>車検が近い車 <span class="tag">${soon.length}台</span></h2>
-    ${soon.length ? f.shown.map(v => `<div class="li tap" data-act="edit" data-id="${v.id}" title="押すと車検満了日を変えられます">${plateHtml(v, true)}<div class="grow"><div class="t">${esc(v.kind)}</div><div class="s">${jp(v.shakenDate)}</div></div><span class="days ${shakenClass(v)}">${shakenText(v)}</span></div>`).join("")
+    ${soon.length ? f.shown.map(v => `<div class="li tap" data-act="edit" data-id="${v.id}" title="押すと車検満了日を変えられます">${plateHtml(v, true)}<div class="grow"><div class="t">${esc(v.kind)}</div><div class="s">${jp(v.shakenDate)}</div></div>${shakenDays(v)}</div>`).join("")
       + f.more : `<div class="empty">${lim}日以内の車検はありません</div>`}
   </div>`;
 }
@@ -1027,7 +1051,8 @@ function openModal(id) {
         ${lots.map(l => `<option${(v ? lotOf(v) === l : l === lots[0]) ? " selected" : ""}>${esc(l)}</option>`).join("")}</select></div>
     </div>
     <div class="mfoot">
-      ${v ? `<button type="button" class="btn danger" data-act="retire">廃車にする</button><button type="button" class="btn ghost" data-act="hideCar">${v.hidden ? "表示に戻す" : "一時的に隠す"}</button>` : ""}
+      ${v ? `<button type="button" class="btn danger" data-act="retire">廃車にする</button><button type="button" class="btn ghost" data-act="hideCar">${v.hidden ? "表示に戻す" : "一時的に隠す"}</button>
+        <button type="button" class="btn insp" data-act="${v.inspection ? "inspBack" : "inspOut"}" data-id="${v.id}">${v.inspection ? "車検から戻す" : "車検に出す"}</button>` : ""}
       <span class="sp"></span>
       <button type="button" class="btn ghost" data-act="close">やめる</button>
       <button type="submit" class="btn primary">${v ? "保存する" : "登録する"}</button>
@@ -1313,6 +1338,103 @@ function restoreVehicle(id) {
   toast("一覧に戻しました");
 }
 
+/* ---------- 車検に出す・車検から戻す（PCのみ） ---------- */
+// 記録は inspections に残す（どの車・出した日・戻した日・前と新しい満了日・操作した人）
+const operator = () => ME || "事務所（PC）";
+function inspHead(v, title) {
+  return `<div class="overlay"><form class="modal panel imodal" id="${title === "車検に出す" ? "ioform" : "ibform"}" data-id="${v.id}" novalidate>
+    <h2>${title}<button type="button" class="x" data-act="close" aria-label="閉じる">×</button></h2>
+    <div class="mbody"><div class="ihead">${plateHtml(v, true)}<b>${esc(v.kind)}</b></div><p class="ferr" id="ferr" hidden></p>`;
+}
+const inspFoot = (v, ok) => `</div><div class="mfoot"><span class="sp"></span>
+    <button type="button" class="btn ghost" data-act="edit" data-id="${v.id}">やめる</button>
+    <button type="submit" class="btn primary" id="i-ok">${ok}</button></div></form></div>`;
+function showFerr(msg) { const e = $("ferr"); e.textContent = msg; e.hidden = false; }
+
+function openInspOut(id) {
+  const v = byId(id); if (!v) return;
+  closeModal();
+  const t = ymd(today());
+  $("modal").innerHTML = inspHead(v, "車検に出す") + `
+    <div class="field"><label for="io-from">出した日</label><input type="date" id="io-from" name="from" value="${t}" max="${t}"></div>
+    <div class="field"><label for="io-until">戻り予定日（任意）</label><input type="date" id="io-until" name="until" min="${t}"></div>
+    <div id="io-clash"></div>` + inspFoot(v, "車検に出す");
+  $("modal").hidden = false;
+}
+// 車検に出す期間にかかる予約（戻り予定日がなければ、出した日〜今日）
+function inspClashes(v, from, until) {
+  const to = until || ymd(today());
+  return S.reservations.filter(r => r.vehicleId === v.id && !r.returnedAt && !r.canceled && r.from <= to && from <= effTo(r))
+    .sort((a, b) => (a.from > b.from ? 1 : -1));
+}
+function saveInspOut(f) {
+  const v = byId(f.dataset.id); if (!v) return;
+  const from = f.from.value, until = f.until.value || null, t = ymd(today());
+  if (!from) return showFerr("出した日を入れてください");
+  if (from > t) return showFerr("出した日は今日までの日にしてください");
+  if (until && until < from) return showFerr("戻り予定日は出した日より後にしてください");
+  // その期間に予約があれば、一覧を出して確かめる（もう一度押すと出す）
+  const clash = inspClashes(v, from, until);
+  if (clash.length && f.dataset.ok !== "1") {
+    $("io-clash").innerHTML = `<div class="iclash"><b>この期間に入っている予約があります</b>${clash.map(r =>
+      `<div>${rangeText(r)}　${esc(r.who)}さん　${esc(r.site)}</div>`).join("")}<p>このまま車検に出しますか？</p></div>`;
+    $("i-ok").textContent = "このまま車検に出す"; f.dataset.ok = "1";
+    return;
+  }
+  const rec = doc(collection(db, "inspections"));
+  const b = writeBatch(db);
+  b.set(rec, {
+    vehicleId: v.id, outDate: from, expectedBack: until, backDate: null,
+    oldShakenDate: v.shakenDate, newShakenDate: null, outBy: operator(), backBy: null, returnedLot: null,
+    outAt: serverTimestamp(), backAt: null,
+  });
+  b.update(doc(db, "vehicles", v.id), { inspection: { id: rec.id, from, until }, updatedAt: serverTimestamp() });
+  b.commit().catch(e => { console.error(e); toast("車検に出せませんでした。もう一度お試しください", "err"); });
+  closeModal();
+  toast("車検に出しました");
+}
+// 日付の入力を変えたら、予約の確認をやり直す
+function resetInspConfirm() {
+  const f = $("ioform"); if (!f || f.dataset.ok !== "1") return;
+  delete f.dataset.ok; $("io-clash").innerHTML = ""; $("i-ok").textContent = "車検に出す";
+}
+
+function openInspBack(id) {
+  const v = byId(id); if (!v || !v.inspection) return;
+  closeModal();
+  const lots = (S.settings.lots || []).filter(Boolean).slice(0, LOT_MAX);
+  $("modal").innerHTML = inspHead(v, "車検から戻す") + `
+    <div class="field"><label for="ib-date">新しい車検満了日</label>
+      <div class="shk-in"><input type="date" id="ib-date" name="shakenDate">
+        <button type="button" class="btn ghost small" data-act="shkPlus" data-val="1">＋1年</button>
+        <button type="button" class="btn ghost small" data-act="shkPlus" data-val="2">＋2年</button>
+        <span class="shk-now">今：${jp(v.shakenDate)}</span></div></div>
+    <div class="field"><label>置き場所</label><div class="seg">${lots.map(l =>
+      `<label class="chip"><input type="radio" name="lot" value="${esc(l)}">${esc(l)}</label>`).join("")}</div></div>` + inspFoot(v, "戻す");
+  $("modal").hidden = false;
+}
+// 「＋1年」「＋2年」：今の満了日から
+function shakenPlus(n) {
+  const f = $("ibform"), v = f && byId(f.dataset.id); if (!v) return;
+  const d = parse(v.shakenDate); d.setFullYear(d.getFullYear() + Number(n));
+  f.shakenDate.value = ymd(d);
+}
+function saveInspBack(f) {
+  const v = byId(f.dataset.id); if (!v || !v.inspection) { closeModal(); return; }
+  const date = f.shakenDate.value, lot = (f.querySelector("input[name=lot]:checked") || {}).value;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return showFerr("新しい車検満了日を入れてください");
+  if (date <= v.shakenDate) return showFerr(`新しい車検満了日は、今の満了日（${jp(v.shakenDate)}）より後にしてください`);
+  if (!lot) return showFerr("置き場所を選んでください");
+  const b = writeBatch(db);
+  b.update(doc(db, "vehicles", v.id), { shakenDate: date, currentLot: lot, inspection: null, updatedAt: serverTimestamp() });
+  if (v.inspection.id) b.set(doc(db, "inspections", v.inspection.id), {
+    vehicleId: v.id, backDate: ymd(today()), newShakenDate: date, backBy: operator(), returnedLot: lot, backAt: serverTimestamp(),
+  }, { merge: true });
+  b.commit().catch(e => { console.error(e); toast("戻せませんでした。もう一度お試しください", "err"); });
+  closeModal();
+  toast(`車検から戻しました（次の満了日 ${fmt(date)}）`);
+}
+
 /* ---------- サンプル投入（試作と同じ8台。日付は今日を基準にずらす） ---------- */
 async function seed() {
   if (S.vehicles.length) return;
@@ -1370,7 +1492,7 @@ async function unseed() {
     });
     const cars = await getDocs(query(collection(db, "vehicles"), where("sample", "==", true)));
     const ids = cars.docs.map(d => d.id);
-    for (const c of ["reservations", "repairs"]) {
+    for (const c of ["reservations", "repairs", "inspections"]) {
       add(await getDocs(query(collection(db, c), where("sample", "==", true))));
       for (let i = 0; i < ids.length; i += 30) add(await getDocs(query(collection(db, c), where("vehicleId", "in", ids.slice(i, i + 30)))));
     }
@@ -1531,6 +1653,9 @@ document.addEventListener("click", e => {
     case "memAdd": addMember(); break;
     case "retire": retireVehicle(modalId); break;
     case "restore": restoreVehicle(id); break;
+    case "inspOut": openInspOut(id); break;
+    case "inspBack": openInspBack(id); break;
+    case "shkPlus": shakenPlus(val); break;
     case "hideCar": { const v = byId(modalId); if (v) setHidden(v.id, !v.hidden); break; }
     case "unhide": setHidden(id, false); break;
     case "seed": seed(); break;
@@ -1546,6 +1671,7 @@ document.addEventListener("change", e => {
     const f = el.files && el.files[0]; el.value = "";
     if (f) setVehiclePhoto(el.dataset.photo, f);
   }
+  if (el.id === "io-from" || el.id === "io-until") resetInspConfirm(); // 車検に出す：日付を変えたら確認し直す
   if (el.id === "f-photo") pickFormPhoto(el); // PCの登録フォーム（保存を押したときに送る）
   if (el.dataset && el.dataset.ntype) setNotify(el.dataset.ntype, [el.dataset.name], el.checked); // PCの設定 → 通知
   if (el.dataset && el.dataset.pref) setMyPref(el.dataset.pref, el.checked); // スマホの「🔔 通知」
@@ -1563,6 +1689,8 @@ document.addEventListener("keydown", e => {
 document.addEventListener("submit", e => {
   if (e.target.id === "vform") { e.preventDefault(); saveVehicle(e.target); }
   if (e.target.id === "sform") { e.preventDefault(); saveSettings(e.target); }
+  if (e.target.id === "ioform") { e.preventDefault(); saveInspOut(e.target); }
+  if (e.target.id === "ibform") { e.preventDefault(); saveInspBack(e.target); }
 });
 // 予約フォームの入力を覚えておく
 $("ph-screen").addEventListener("input", e => {

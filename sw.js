@@ -5,7 +5,7 @@
 //   写真を変えると写真のアドレスが変わるので、新しい写真は自動で取りに行く
 // - データ（Firestore）は Firebase が自分で処理するので、ここでは触らない
 // - プッシュ通知（Cloud Functions から Firebase Cloud Messaging で届く）を表示し、押したらアプリを開く
-const CACHE = "sharyo-v9"; // 版を上げると、スマホに保存した古い画面・アイコンを入れ替える
+const CACHE = "sharyo-v10"; // 版を上げると、スマホに保存した古い画面・アイコンを入れ替える
 const PHOTO_CACHE = "sharyo-photos-v1", PHOTO_MAX_ITEMS = 200; // 写真の置き場（画面の版を上げても消さない）
 const SHELL = [
   "./", "./index.html", "./style.css", "./app.js", "./firebase-config.js", "./manifest.webmanifest",

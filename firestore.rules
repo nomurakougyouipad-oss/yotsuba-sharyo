@@ -45,7 +45,14 @@ service cloud.firestore {
         && (!('license' in d) || d.license in ['普通', '準中型5t', '準中型', '中型8t', '中型', '大型'])
         && optStr(d, 'owner', 40)
         && (!('hidden' in d) || d.hidden is bool)
+        && (!('inspection' in d) || d.inspection == null || validInspState(d.inspection))
         && d.retired is bool;
+    }
+    // 車検中の印（vehicles の inspection）：出した日・戻り予定日（任意）・記録のID
+    function validInspState(x) {
+      return x is map && x.keys().hasOnly(['id', 'from', 'until'])
+        && isDate(x.from) && (!('until' in x) || x.until == null || isDate(x.until))
+        && optStr(x, 'id', 100);
     }
     match /vehicles/{vehicleId} {
       allow read: if signedIn();
@@ -84,6 +91,24 @@ service cloud.firestore {
     match /repairs/{repairId} {
       allow read: if signedIn();
       allow create, update: if signedIn() && validRepair(request.resource.data);
+      allow delete: if signedIn() && (isSample() || onSampleVehicle());
+    }
+
+    // ---- 車検の記録（車検に出す・戻す。あとで車屋さん用の画面で使う） ----
+    function optDate(d, k) {
+      return !(k in d) || d[k] == null || isDate(d[k]);
+    }
+    function validInspection(d) {
+      return d.keys().hasAll(['vehicleId', 'outDate'])
+        && str(d.vehicleId, 100)
+        && isDate(d.outDate)
+        && optDate(d, 'expectedBack') && optDate(d, 'backDate')
+        && optDate(d, 'oldShakenDate') && optDate(d, 'newShakenDate')
+        && optStr(d, 'outBy', 40) && optStr(d, 'backBy', 40) && optStr(d, 'returnedLot', 30);
+    }
+    match /inspections/{inspectionId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && validInspection(request.resource.data);
       allow delete: if signedIn() && (isSample() || onSampleVehicle());
     }
 

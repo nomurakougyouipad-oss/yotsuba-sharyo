@@ -1,5 +1,5 @@
 // 社用車管理アプリ（yotsuba-sharyo）プッシュ通知
-// 1. 車検：満了日まで shakenAlertDays 日以内になったら、朝8時に1回
+// 1. 車検：満了日まで shakenAlertDays 日以内になったら、朝8時に1回（車検に出している車は除く。戻して満了日が変われば、新しい満了日でまた届く）
 // 2. 返却予定日：予約の to の日の17時、まだ返却されていなければ（使う人本人だけ）
 // 3. 返却遅れ：to の翌日の朝9時、まだ返却されていなければ（使う人本人だけ）
 // 4. 修理依頼：repairs に新しく登録されたとき、すぐ
@@ -102,7 +102,7 @@ exports.shakenMorning = onSchedule({ schedule: "0 8 * * *", timeZone: TZ }, asyn
   if (!names.length) return;
   for (const c of cars.docs) {
     const v = c.data();
-    if (v.retired || v.hidden || v.sample || !v.shakenDate) continue;
+    if (v.retired || v.hidden || v.sample || v.inspection || !v.shakenDate) continue; // 車検に出している車には送らない
     const d = daysBetween(today, v.shakenDate);
     if (d < 0 || d > alert) continue;
     // 満了日ごとに1回（車検を受けて満了日が変われば、次の満了日でまた届く）

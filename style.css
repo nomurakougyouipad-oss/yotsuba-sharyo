@@ -5,6 +5,7 @@
   --free:#2E9E5B; --free-bg:#E3F5EA;
   --use:#E08A1E; --use-bg:#FCEFD9;
   --fix:#C8443A; --fix-bg:#F9E1DE;
+  --insp:#7A5BB5; --insp-bg:#EEE8F8; --insp-t:#6A4BA5; /* 車検中（紫） */
   --plate:#F5F7F2; --plate-ink:#1B222B;
   /* 文字・枠線に使う色（ライトモードは上と同じ。ダークモードだけ明るくして背景に沈まないようにする） */
   --steel-t:var(--steel); --steel-t-ink:#FFFFFF; --use-deep:#8A4F00; --fix-deep:#9E2C24; --free-t:var(--free); --use-t:var(--use); --fix-t:var(--fix); --line-strong:var(--line);
@@ -14,13 +15,13 @@
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
     --bg:#171A1E; --paper:#22262C; --ink:#EEF0EC; --mute:#A3ABB5; --line:#3A4048;
-    --free-bg:#1E3A2A; --use-bg:#3E2E15; --fix-bg:#3F2220; --plate:#F5F7F2;
+    --free-bg:#1E3A2A; --use-bg:#3E2E15; --fix-bg:#3F2220; --insp-bg:#2F2642; --insp-t:#C2ABF0; --plate:#F5F7F2;
     --steel-t:#A9CBEF; --steel-t-ink:#16202B; --use-deep:#F2AE55; --fix-deep:#FF8F85; --free-t:#6BD197; --use-t:#F2AE55; --fix-t:#FF8F85; --line-strong:#6B7480;
   }
 }
 :root[data-theme="dark"]{
   --bg:#171A1E; --paper:#22262C; --ink:#EEF0EC; --mute:#A3ABB5; --line:#3A4048;
-  --free-bg:#1E3A2A; --use-bg:#3E2E15; --fix-bg:#3F2220; --plate:#F5F7F2;
+  --free-bg:#1E3A2A; --use-bg:#3E2E15; --fix-bg:#3F2220; --insp-bg:#2F2642; --insp-t:#C2ABF0; --plate:#F5F7F2;
   --steel-t:#A9CBEF; --steel-t-ink:#16202B; --use-deep:#F2AE55; --fix-deep:#FF8F85; --free-t:#6BD197; --use-t:#F2AE55; --fix-t:#FF8F85; --line-strong:#6B7480;
 }
 html{scroll-padding-top:env(safe-area-inset-top,0px)}
@@ -500,3 +501,25 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
 .pst{font-size:11px;color:var(--mute);border:1px solid var(--line-strong);border-radius:6px;padding:1px 6px;font-weight:700}
 .pst.ok{color:var(--free-t);border-color:var(--free-t)}
 #sform.modal{width:min(820px,100%)} /* 通知の表が横に収まるよう、設定だけ少し広く */
+
+/* ---- 車検中（紫） ---- */
+.band.insp,.status-pill.insp{background:var(--insp)}
+.dot.insp{background:var(--insp)}
+.count.insp{background:var(--insp-bg);color:var(--insp-t)}
+.days.insp{background:var(--insp-bg);color:var(--insp-t)}
+.table tr.grp.insp td{color:var(--insp-t);border-left-color:var(--insp)}
+.table tr.vrow.insp td:first-child{border-left-color:var(--insp)}
+.table tr.vrow.insp td{background:color-mix(in srgb,var(--insp) 4%,var(--paper))}
+.chips.six{grid-template-columns:repeat(6,minmax(0,1fr))}
+.insnote{font-size:14px;color:var(--insp-t);font-weight:700;margin-top:4px}
+.btn.insp{background:var(--insp-bg);color:var(--insp-t)}
+/* PC：車検に出す・戻す の小さな画面 */
+.imodal.modal{width:min(480px,100%)}
+.ihead{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.shk-in{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.shk-in input{flex:1;min-width:170px;width:auto}
+.shk-now{color:var(--mute);font-size:13px;width:100%}
+.iclash{background:var(--use-bg);border-radius:12px;padding:12px 14px;font-size:14px}
+.iclash b{display:block;color:var(--use-deep);margin-bottom:4px}
+.iclash div{padding:2px 0;overflow-wrap:anywhere}
+.iclash p{margin:8px 0 0;font-weight:700}

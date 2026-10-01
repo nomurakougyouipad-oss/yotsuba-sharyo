@@ -191,6 +191,13 @@ settings/app
   lots: ["本社","松前工場","伊予工場"]
   shakenAlertDays: 30
 
+inspections/{id}                 // 車検の記録（PCの「車検に出す」「車検から戻す」）。今は画面に出さない
+  vehicleId, outDate, expectedBack, backDate
+  oldShakenDate, newShakenDate     // 前の満了日・新しい満了日
+  outBy, backBy, returnedLot       // 操作した人・戻した置き場所
+  outAt, backAt
+// vehicles の inspection: { id, from, until } があいだは「車検中」（戻すと null）
+
 settings/notify                  // 通知を届ける人（PC ⚙設定 → 通知）。最初は全員オフ
   shaken: ["田中",...]  due: [...]  overdue: [...]  repair: [...]
 
@@ -209,6 +216,7 @@ notifyLog/{通知のキー}             // 送った記録（Functions だけが
 
 ### 状態の決め方
 - `retired` → 表示しない
+- `inspection` がある → **車検中**（紫 #7A5BB5）。出した日〜戻り予定日（なければ今日）に重なる予約はできない
 - 修理 `status == "in_repair"` の依頼がある → **修理中**
 - 今日を含む予約（from ≤ 今日 ≤ to）で `returnedAt` が空 → **使用中**
 - それ以外 → **空き**
