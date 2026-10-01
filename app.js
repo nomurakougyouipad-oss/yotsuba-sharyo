@@ -224,7 +224,15 @@ function applyView() {
   if (ui.view !== "pc") closeModal();
   render();
 }
-function go(s) { ui.screen = s; ui.menu = false; form.err = ""; render(); $("ph-screen").scrollTop = 0; }
+// 一覧から別の画面へ行くときはスクロール位置を覚えておき、詳細から「戻る」で一覧に戻ったら元の位置に戻す
+// （下のタブを押したときなどは一番上から）
+let listPos = null; // { tab, top }
+function go(s) {
+  const sc = $("ph-screen");
+  if (ui.screen.name === "list" && s.name !== "list") listPos = { tab: ui.tab, top: sc.scrollTop };
+  ui.screen = s; ui.menu = false; form.err = ""; render();
+  sc.scrollTop = s.restore && listPos && listPos.tab === ui.tab ? listPos.top : 0;
+}
 function setTab(t) { ui.tab = t; go({ name: "list" }); }
 
 function render() { if (ui.view === "phone") renderPhone(); else renderPc(); loadImages(); }
@@ -291,7 +299,7 @@ function renderPhone() {
   } else {
     const v = byId(sc.id);
     if (!v || v.retired || v.hidden) { ui.screen = { name: "list" }; return renderPhone(); }
-    back = sc.name === "detail" ? { name: "list" } : { name: "detail", id: v.id };
+    back = sc.name === "detail" ? { name: "list", restore: true } : { name: "detail", id: v.id };
     if (sc.name === "detail") { title = esc(v.kind); body = detail(v); }
     if (sc.name === "reserve") { title = "予約"; body = reserveForm(v); }
     if (sc.name === "return") { title = "返却"; body = returnForm(v); }
@@ -683,8 +691,9 @@ function listRepairs() {
   if (!S.repairs.length) return `<div class="empty">修理依頼はありません</div>`;
   return sortedRepairs(S.repairs).map(r => {
     const [cls, label] = REPAIR_TAG[r.status] || REPAIR_TAG.open;
+    const v = byId(r.vehicleId), tap = v && !v.retired && !v.hidden; // 押すとその車の詳細へ
     return `
-  <div class="li"><div class="grow"><div class="t">${esc(repairText(r))}</div><div class="s">${repairKind(r)}　${repairDate(r)}　${esc(r.reportedBy || "")}</div></div>
+  <div class="li${tap ? " tap" : ""}"${tap ? ` data-act="detail" data-id="${v.id}" role="button" tabindex="0"` : ""}><div class="grow"><div class="t">${esc(repairText(r))}</div><div class="s">${repairKind(r)}　${repairDate(r)}　${esc(r.reportedBy || "")}</div></div>
     <span class="tag ${cls}">${label}</span></div>`;
   }).join("");
 }
