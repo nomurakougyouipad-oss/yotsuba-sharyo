@@ -523,3 +523,4 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
 .iclash b{display:block;color:var(--use-deep);margin-bottom:4px}
 .iclash div{padding:2px 0;overflow-wrap:anywhere}
 .iclash p{margin:8px 0 0;font-weight:700}
+.me-ver{padding:6px 16px 8px;border-top:1px solid var(--line);font-size:11px;color:var(--mute);text-align:right}

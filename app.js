@@ -35,6 +35,7 @@ const db = initializeFirestore(fbApp, { localCache: persistentLocalCache({ tabMa
 const storage = getStorage(fbApp);
 
 /* ---------- 定数 ---------- */
+const APP_VERSION = "14"; // 版の番号（名前のメニューの下に出す）。sw.js の CACHE（sharyo-v○○）と同じ番号にする
 const TYPES = ["トラック", "バン", "普通車"];
 const LABEL = { free: "空き", use: "使用中", fix: "修理中", own: "専用", insp: "車検中" };
 const DEFAULT_SETTINGS = {
@@ -229,13 +230,24 @@ function applyView() {
 let listPos = null; // { tab, top }
 // 端末の「戻る」（Android の戻るボタン・iPhone の左端からなぞる）用に、一覧以外の画面のあいだだけ履歴を1つ積んでおく
 // → 一覧以外で「戻る」を押すとアプリの「‹」と同じ動き、一覧で押すと今までどおりアプリが閉じる
+// iPhone のホーム画面アプリは端末の「戻る」がない（左端からなぞるのはアプリ側で見ている）ので履歴は使わない
+// （履歴を戻すと iOS がスクロール位置を一番上に戻してしまうため）
 let ignorePop = false;
+const useNavHistory = () => !(isIOS && isStandalone());
 const hasNavEntry = () => !!(history.state && history.state.sharyo);
+if ("scrollRestoration" in history) history.scrollRestoration = "manual"; // ブラウザ自身のスクロール復元とぶつからないように
+// 一覧に戻ったときの位置（描き直しや履歴の処理のあとにも、もう一度合わせる）
+function applyListPos() {
+  const s = ui.screen;
+  if (s.name === "list" && s.restore && listPos && listPos.tab === ui.tab) $("ph-screen").scrollTop = listPos.top;
+}
 function go(s, fromPop) {
   const sc = $("ph-screen"), wasList = ui.screen.name === "list", toList = s.name === "list";
   if (wasList && !toList) listPos = { tab: ui.tab, top: sc.scrollTop };
   ui.screen = s; ui.menu = false; form.err = ""; render();
-  sc.scrollTop = s.restore && listPos && listPos.tab === ui.tab ? listPos.top : 0;
+  sc.scrollTop = 0; applyListPos();
+  if (toList && s.restore) requestAnimationFrame(applyListPos);
+  if (!useNavHistory()) return;
   if (fromPop) { if (!toList) history.pushState({ sharyo: 1 }, ""); } // 1段戻っても、まだ一覧でなければ積み直す
   else if (wasList && !toList && !hasNavEntry()) history.pushState({ sharyo: 1 }, "");
   else if (toList && hasNavEntry()) { ignorePop = true; history.back(); } // 「‹」やタブで一覧に戻ったら、積んだ分を外す
@@ -276,7 +288,10 @@ function refresh() {
   const a = document.activeElement;
   const typing = a && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName) && !["file", "radio", "checkbox", "button", "submit"].includes(a.type);
   if (ui.view === "phone" && typing && $("ph-screen").contains(a)) return;
+  // データが届いて描き直しても、今のスクロール位置のまま
+  const sc = $("ph-screen"), top = sc.scrollTop;
   render();
+  if (ui.view === "phone" && sc.scrollTop !== top) sc.scrollTop = top;
 }
 
 /* ================= スマホ版 ================= */
@@ -297,7 +312,7 @@ function renderPhone() {
   const d = today(), sc = ui.screen;
   if (sc.name === "list") {
     pill = `<button class="me-pill" data-act="meMenu" aria-haspopup="menu" aria-expanded="${!!ui.menu}">${esc(ME)}</button>`
-      + (ui.menu ? `<div class="me-menu" role="menu"><button role="menuitem" data-act="meEdit">名前を変える</button><button role="menuitem" data-act="goNotify">🔔 通知</button></div>` : "");
+      + (ui.menu ? `<div class="me-menu" role="menu"><button role="menuitem" data-act="meEdit">名前を変える</button><button role="menuitem" data-act="goNotify">🔔 通知</button><div class="me-ver">版 ${APP_VERSION}</div></div>` : "");
     if (ui.tab === "cars") body = listCars();
     else if (ui.tab === "shaken") { title = "車検"; body = listShaken(); }
     else { title = "修理依頼"; body = listRepairs(); }
@@ -1735,7 +1750,7 @@ document.addEventListener("toggle", e => {
 wide.addEventListener("change", applyView);
 // 端末の「戻る」：写真を開いていれば閉じる。一覧以外ならアプリの「‹」と同じ。一覧なら何もしない（アプリが閉じる）
 addEventListener("popstate", () => {
-  if (ignorePop) { ignorePop = false; return; }
+  if (ignorePop) { ignorePop = false; applyListPos(); return; } // 履歴を外し終わったあとも、一覧の位置を合わせ直す
   if (ui.view !== "phone" || ui.screen.name === "list") return;
   if (viewer) { closeViewer(); history.pushState({ sharyo: 1 }, ""); return; }
   go(ui.backTo || { name: "list", restore: true }, true);
