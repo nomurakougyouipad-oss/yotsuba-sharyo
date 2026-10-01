@@ -227,12 +227,20 @@ function applyView() {
 // 一覧から別の画面へ行くときはスクロール位置を覚えておき、詳細から「戻る」で一覧に戻ったら元の位置に戻す
 // （下のタブを押したときなどは一番上から）
 let listPos = null; // { tab, top }
-function go(s) {
-  const sc = $("ph-screen");
-  if (ui.screen.name === "list" && s.name !== "list") listPos = { tab: ui.tab, top: sc.scrollTop };
+// 端末の「戻る」（Android の戻るボタン・iPhone の左端からなぞる）用に、一覧以外の画面のあいだだけ履歴を1つ積んでおく
+// → 一覧以外で「戻る」を押すとアプリの「‹」と同じ動き、一覧で押すと今までどおりアプリが閉じる
+let ignorePop = false;
+const hasNavEntry = () => !!(history.state && history.state.sharyo);
+function go(s, fromPop) {
+  const sc = $("ph-screen"), wasList = ui.screen.name === "list", toList = s.name === "list";
+  if (wasList && !toList) listPos = { tab: ui.tab, top: sc.scrollTop };
   ui.screen = s; ui.menu = false; form.err = ""; render();
   sc.scrollTop = s.restore && listPos && listPos.tab === ui.tab ? listPos.top : 0;
+  if (fromPop) { if (!toList) history.pushState({ sharyo: 1 }, ""); } // 1段戻っても、まだ一覧でなければ積み直す
+  else if (wasList && !toList && !hasNavEntry()) history.pushState({ sharyo: 1 }, "");
+  else if (toList && hasNavEntry()) { ignorePop = true; history.back(); } // 「‹」やタブで一覧に戻ったら、積んだ分を外す
 }
+const goBack = () => go(ui.backTo || { name: "list", restore: true });
 function setTab(t) { ui.tab = t; go({ name: "list" }); }
 
 function render() { if (ui.view === "phone") renderPhone(); else renderPc(); loadImages(); }
@@ -280,7 +288,7 @@ function renderPhone() {
   t.innerHTML = [["cars", "🚐", "車両"], ["shaken", "📋", "車検"], ["repair", "🔧", "修理"]].map(([k, ic, l]) =>
     `<button class="${ui.tab === k ? "on" : ""}" data-act="tab" data-val="${k}"><span class="ic">${ic}</span>${l}${k === "repair" && openCount() ? `<span class="badge">${openCount()}</span>` : ""}</button>`).join("");
   if (ui.screen.name === "me" || ui.screen.name === "notify") {
-    ui.backTo = { name: "list" }; ui.menu = false;
+    ui.backTo = { name: "list", restore: true }; ui.menu = false;
     h.innerHTML = `<button class="back" data-act="back" aria-label="戻る">‹</button><h1>${ui.screen.name === "me" ? "あなたの名前" : "🔔 通知"}</h1>`;
     s.innerHTML = ui.screen.name === "me" ? nameScreen(false) : notifyScreen(); return;
   }
@@ -1630,7 +1638,7 @@ document.addEventListener("click", e => {
     case "pcPanel": pcUi.panels[val] = !pcUi.panels[val]; savePcUi(); render(); break;
     case "tfilter": ui.tfilter = val; render(); break;
     case "detail": detMonth = 0; go({ name: "detail", id }); break;
-    case "back": go(ui.backTo || { name: "list" }); break;
+    case "back": goBack(); break;
     case "goto": go({ name: val, id }); break;
     case "me": saveMe(val); break;
     case "meEdit": go({ name: "me" }); break;
@@ -1725,6 +1733,30 @@ document.addEventListener("toggle", e => {
   else if (e.target.matches("details.retired")) ui.retiredOpen = e.target.open;
 }, true);
 wide.addEventListener("change", applyView);
+// 端末の「戻る」：写真を開いていれば閉じる。一覧以外ならアプリの「‹」と同じ。一覧なら何もしない（アプリが閉じる）
+addEventListener("popstate", () => {
+  if (ignorePop) { ignorePop = false; return; }
+  if (ui.view !== "phone" || ui.screen.name === "list") return;
+  if (viewer) { closeViewer(); history.pushState({ sharyo: 1 }, ""); return; }
+  go(ui.backTo || { name: "list", restore: true }, true);
+});
+// 前に開いたときの履歴が残っていたら外す（アプリは一覧から始まるため）
+if (hasNavEntry()) { ignorePop = true; history.back(); }
+// iPhone のホーム画面アプリは端末の「戻る」がないので、画面の左端から右へなぞったら戻る
+if (isIOS && isStandalone()) {
+  let sx = null, sy = 0;
+  document.addEventListener("touchstart", e => {
+    const t = e.touches[0];
+    sx = e.touches.length === 1 && t.clientX < 24 && ui.view === "phone" && ui.screen.name !== "list" && !viewer ? t.clientX : null;
+    sy = t.clientY;
+  }, { passive: true });
+  document.addEventListener("touchend", e => {
+    if (sx == null) return;
+    const t = e.changedTouches[0];
+    if (t.clientX - sx > 70 && Math.abs(t.clientY - sy) < 60) goBack();
+    sx = null;
+  }, { passive: true });
+}
 // 日付が変わったら表示（使用中／空き）を更新
 let shownDay = ymd(today());
 setInterval(() => { if (ymd(today()) !== shownDay) { shownDay = ymd(today()); render(); } }, 60000);
