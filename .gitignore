@@ -9,3 +9,5 @@ new-icons/
 # Cloud Functions の部品（npm install で入る）
 functions/node_modules/
 *.log
+# 試作（見本）は公開しない
+shop-proto.html

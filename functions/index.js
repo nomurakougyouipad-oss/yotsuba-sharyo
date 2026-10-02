@@ -37,7 +37,8 @@ async function loadAudience() {
   ]);
   const off = new Map(prefs.docs.map(d => [d.get("name"), new Set(d.get("off") || [])]));
   const byName = new Map();
-  tokens.forEach(d => { const n = d.get("name"); if (!n) return; if (!byName.has(n)) byName.set(n, []); byName.get(n).push(d.id); });
+  // app: "shop" はトラストワンのページの端末（通知を押すと shop.html を開く）
+  tokens.forEach(d => { const n = d.get("name"); if (!n) return; if (!byName.has(n)) byName.set(n, []); byName.get(n).push({ token: d.id, app: d.get("app") === "shop" ? "shop" : "staff" }); });
   const on = type => new Set(cfg.exists ? cfg.get(type) || [] : []);
   return {
     // この通知が届く人（端末がある人だけ）。only を渡すとその人たちの中から
@@ -66,14 +67,21 @@ async function claim(key, names, info) {
 // 無効になった端末（アプリを消した・許可を取り消した など）
 const DEAD = new Set(["messaging/registration-token-not-registered", "messaging/invalid-registration-token"]);
 
-async function send(tokens, { title, body, tag }) {
-  if (!tokens.length) return;
+const APP_URL = { staff: "./", shop: "./shop.html" };
+// 端末（{ token, app }）を、開くページごとに分けて送る
+async function send(targets, msg) {
+  for (const app of Object.keys(APP_URL)) {
+    const tokens = targets.filter(t => t.app === app).map(t => t.token);
+    if (tokens.length) await sendTo(tokens, { ...msg, url: APP_URL[app] });
+  }
+}
+async function sendTo(tokens, { title, body, tag, url }) {
   for (let i = 0; i < tokens.length; i += 500) {
     const chunk = tokens.slice(i, i + 500);
     // data だけで送り、表示は sw.js が行う（iPhone でも同じ動きにするため）
     const res = await getMessaging().sendEachForMulticast({
       tokens: chunk,
-      data: { title, body, tag, url: "./" },
+      data: { title, body, tag, url },
       webpush: { headers: { Urgency: "high", TTL: String(24 * 3600) } },
     });
     const dead = [];

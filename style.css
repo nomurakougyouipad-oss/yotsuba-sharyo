@@ -524,3 +524,10 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
 .iclash div{padding:2px 0;overflow-wrap:anywhere}
 .iclash p{margin:8px 0 0;font-weight:700}
 .me-ver{padding:6px 16px 8px;border-top:1px solid var(--line);font-size:11px;color:var(--mute);text-align:right}
+/* ---- トラストワン（整備工場） ---- */
+.insnote.shopnote,.s.shopnote{color:var(--steel-t);font-weight:700}
+.pc .li:has(> .avail){flex-wrap:wrap;row-gap:4px}
+.avail{flex-basis:100%;display:flex;align-items:center;justify-content:flex-end;gap:6px;font-size:12px;color:var(--mute);cursor:default}
+.avail span{white-space:nowrap}
+.avail input{width:auto;padding:3px 6px;font-size:13px;border-radius:7px}
+.ntable td.nna{color:var(--mute)}

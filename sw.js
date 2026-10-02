@@ -5,10 +5,11 @@
 //   写真を変えると写真のアドレスが変わるので、新しい写真は自動で取りに行く
 // - データ（Firestore）は Firebase が自分で処理するので、ここでは触らない
 // - プッシュ通知（Cloud Functions から Firebase Cloud Messaging で届く）を表示し、押したらアプリを開く
-const CACHE = "sharyo-v14"; // 版を上げると、スマホに保存した古い画面・アイコンを入れ替える
+const CACHE = "sharyo-v15"; // 版を上げると、スマホに保存した古い画面・アイコンを入れ替える
 const PHOTO_CACHE = "sharyo-photos-v1", PHOTO_MAX_ITEMS = 200; // 写真の置き場（画面の版を上げても消さない）
 const SHELL = [
   "./", "./index.html", "./style.css", "./app.js", "./firebase-config.js", "./manifest.webmanifest",
+  "./shop.html", "./shop.js", "./shop.css", "./shop.webmanifest", // トラストワン用ページ
   "./icons/icon-192.png?v=2", "./icons/icon-512.png?v=2", "./icons/icon-maskable-192.png?v=3", "./icons/icon-maskable-512.png?v=3",
   "./icons/apple-touch-icon.png?v=2", "./icons/favicon-32.png?v=2",
 ];
@@ -72,12 +73,13 @@ self.addEventListener("push", e => {
     data: { url: d.url || "./" },
   }));
 });
-// 通知を押したら：開いているアプリがあればそれを前に、なければ開く
+// 通知を押したら：同じページ（社員用 / トラストワン用 shop.html）が開いていればそれを前に、なければ開く
 self.addEventListener("notificationclick", e => {
   e.notification.close();
   const url = new URL((e.notification.data && e.notification.data.url) || "./", self.registration.scope).href;
   e.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(list => {
-    const open = list.find(c => c.url.startsWith(self.registration.scope) && "focus" in c);
+    const shop = url.includes("shop.html");
+    const open = list.find(c => c.url.startsWith(self.registration.scope) && c.url.includes("shop.html") === shop && "focus" in c);
     return open ? open.focus() : self.clients.openWindow(url);
   }));
 });

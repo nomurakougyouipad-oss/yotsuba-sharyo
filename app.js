@@ -35,8 +35,9 @@ const db = initializeFirestore(fbApp, { localCache: persistentLocalCache({ tabMa
 const storage = getStorage(fbApp);
 
 /* ---------- 定数 ---------- */
-const APP_VERSION = "14"; // 版の番号（名前のメニューの下に出す）。sw.js の CACHE（sharyo-v○○）と同じ番号にする
+const APP_VERSION = "15"; // 版の番号（名前のメニューの下に出す）。sw.js の CACHE（sharyo-v○○）と同じ番号にする
 const TYPES = ["トラック", "バン", "普通車"];
+const SHOP_NAME = "トラストワン"; // 整備工場（子会社）の名前。専用ページは shop.html
 const LABEL = { free: "空き", use: "使用中", fix: "修理中", own: "専用", insp: "車検中" };
 const DEFAULT_SETTINGS = {
   sites: ["東レ 定修", "太陽石油", "黒藤川発電所", "熊本 浄化センター", "松前工場 内作"],
@@ -53,6 +54,7 @@ const S = {
   notify: {}, notifyLoaded: false, // 通知を届ける人（PCで選ぶ）：{ shaken: [名前…], due: […], overdue: […], repair: […] }
   prefs: new Map(), // 本人がスマホでオフにした通知：名前 → Set(種類)
   tokenNames: new Set(), // 通知を許可した端末がある人の名前
+  shopUsers: [], // トラストワンの人の名前（例：山岡（トラストワン））
   ready: false, error: "",
 };
 
@@ -208,8 +210,11 @@ function bandExtra(v, st, use) {
   if (st !== "fix" && next) return `<span class="period"><small>次の予約</small>${fmt(next.from)}〜</span>`;
   return "";
 }
+// トラストワン（整備工場）が修理で預かっている：例「トラストワン預かり 10/1〜（戻り予定 10/5）」
+const shopText = r => (r && r.shop ? `${esc(r.shop.shop || SHOP_NAME)}預かり ${fmt(r.shop.from)}〜${r.shop.until ? `（戻り予定 ${fmt(r.shop.until)}）` : ""}` : "");
 function useText(v, use, fix) {
   if (v.inspection) return "車検に出しています";
+  if (!use && fix && fix.shop) return shopText(fix);
   return use ? `${esc(use.who)}さん → ${esc(use.site)}` : (fix ? `修理待ち：${esc(repairText(fix))}` : `${esc(lotOf(v))} にあります`);
 }
 const errBar = () => (S.error ? `<div class="errbar">${esc(S.error)}</div>` : "");
@@ -288,6 +293,7 @@ function refresh() {
   const a = document.activeElement;
   const typing = a && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName) && !["file", "radio", "checkbox", "button", "submit"].includes(a.type);
   if (ui.view === "phone" && typing && $("ph-screen").contains(a)) return;
+  if (a && a.dataset && a.dataset.avail) return; // PC：預けられる日を選んでいる途中は描き直さない
   // データが届いて描き直しても、今のスクロール位置のまま
   const sc = $("ph-screen"), top = sc.scrollTop;
   render();
@@ -387,8 +393,8 @@ function detail(v) {
     use ? ["使っている人", esc(use.who) + "さん"] : null,
     use ? ["現場", esc(use.site)] : null,
     use ? ["いつまで", isOverdue(use) ? `<span class="warn">${fmt(use.to)} まで（返却予定を過ぎています）</span>` : `${fmt(use.to)} まで`] : null,
-    !use && !insp ? ["置いてある場所", esc(lotOf(v))] : null,
-    fix ? ["修理", `<span class="warn">${esc(repairText(fix))}</span>`] : null,
+    !use && !insp && !(fix && fix.shop) ? ["置いてある場所", esc(lotOf(v))] : null, // トラストワン預かり中は出さない
+    fix ? ["修理", `<span class="warn">${esc(repairText(fix))}</span>${fix.shop ? `<div class="insnote shopnote">${shopText(fix)}</div>` : ""}`] : null,
     [insp ? "車検満了日" : "車検", `<span class="${shakenClass(v) ? "warn" : ""}">${jp(v.shakenDate)}（${shakenText(v)}）</span>`],
     v.owner ? ["専用", `${esc(v.owner)}さん専用`] : null,
     licOf(v) !== "普通" ? ["必要な免許", `${licOf(v)}以上<div class="licnote">${esc(LICENSE_NOTE[licOf(v)])}</div>`] : null,
@@ -722,16 +728,17 @@ function listRepairs() {
 }
 
 // 「修理を頼む」の入力中の内容
-const rform = { vid: null, sym: new Set(), memo: "", photos: [], err: "", busy: false, pct: 0 };
+const rform = { vid: null, sym: new Set(), memo: "", avail: "", photos: [], err: "", busy: false, pct: 0 };
 function resetRform(vid) {
   rform.photos.forEach(p => URL.revokeObjectURL(p.url));
-  Object.assign(rform, { vid, sym: new Set(), memo: "", photos: [], err: "", busy: false, pct: 0 });
+  Object.assign(rform, { vid, sym: new Set(), memo: "", avail: "", photos: [], err: "", busy: false, pct: 0 });
 }
 function repairForm(v) {
   if (rform.vid !== v.id) resetRform(v.id);
   return `<div class="sheet-title">${esc(v.kind)}</div><p class="sub">${plateText(v)}</p>
   <div class="field"><label>どこが悪い？（複数OK）</label><div class="sympt">${SYMPTOMS.map(x => `<button class="chip ${rform.sym.has(x) ? "on" : ""}" data-act="sym" data-val="${x}">${x}</button>`).join("")}</div></div>
   <div class="field"><label for="r-memo">くわしく（任意）</label><textarea id="r-memo" name="memo" rows="3" maxlength="2000" placeholder="例：右に曲がるときにゴトゴト鳴る">${esc(rform.memo)}</textarea></div>
+  <div class="field"><label for="r-avail">預けられる日（任意）</label><input type="date" id="r-avail" name="avail" min="${ymd(today())}" value="${esc(rform.avail)}"></div>
   <div class="field">${rform.photos.length < MAX_REPAIR_PHOTOS
     ? `<label class="photo-box">📷 写真をつける${rform.photos.length ? `（${rform.photos.length}枚）` : ""}<input type="file" id="r-photo" accept="image/*,.heic,.heif" multiple hidden></label>` : ""}
     ${rform.photos.length ? `<div class="rphotos">${rform.photos.map((p, i) => `<div class="rphoto"><img src="${p.url}" alt=""><button class="rm" data-act="rmPhoto" data-val="${i}" aria-label="この写真をはずす">×</button></div>`).join("")}</div>` : ""}</div>
@@ -776,7 +783,7 @@ async function doRepair(v) {
   // 頼んだ人は自分の名前。出しただけでは「修理中」にしない（事務所が決める）
   setDoc(ref, {
     vehicleId: v.id, symptoms: SYMPTOMS.filter(x => rform.sym.has(x)), memo,
-    photoUrls: photos.map(p => p.photoUrl), photos, reportedBy: ME, status: "open",
+    photoUrls: photos.map(p => p.photoUrl), photos, reportedBy: ME, status: "open", availDate: rform.avail || null, // 預けられる日（トラストワンの画面に出る）
     createdAt: serverTimestamp(), doneAt: null,
   }).catch(e => { console.error(e); toast("修理依頼を送れませんでした。もう一度お試しください"); });
   resetRform(null);
@@ -847,7 +854,7 @@ function renderPc() {
           return `<tr class="vrow ${g}${over ? " over" : ""}" data-act="edit" data-id="${v.id}" title="押すと修正できます">
         <td class="st"><span class="dot ${g}"></span>${LABEL[g]}${over ? '<div><span class="tag overdue">返却待ち</span></div>' : ""}</td>
         <td>${thumbHtml(v, false, true)}</td><td>${plateHtml(v, true)}</td><td class="kind">${esc(v.kind)}${vehicleTags(v)}</td>
-        <td>${use ? esc(use.who) : "—"}</td><td>${use ? `${esc(use.site)}<div class="s${over ? " overdue-s" : ""}" style="font-size:12px">${fmt(use.from)}〜${fmt(use.to)}${over ? "（返却予定を過ぎています）" : ""}</div>` : insp ? `車検<div class="s" style="font-size:12px">${inspText(v.inspection)}</div>` : "—"}</td>
+        <td>${use ? esc(use.who) : "—"}</td><td>${use ? `${esc(use.site)}<div class="s${over ? " overdue-s" : ""}" style="font-size:12px">${fmt(use.from)}〜${fmt(use.to)}${over ? "（返却予定を過ぎています）" : ""}</div>` : insp ? `車検<div class="s" style="font-size:12px">${inspText(v.inspection)}</div>` : (g === "fix" && fixRepair(v) && fixRepair(v).shop ? `<div class="s" style="font-size:12px">${shopText(fixRepair(v))}</div>` : "—")}</td>
         <td>${use || insp ? "—" : esc(lotOf(v))}</td><td>${shakenDays(v, ' style="font-size:13px"')}</td></tr>`;
         }).join(""));
       }).join("")}
@@ -997,12 +1004,20 @@ async function uploadRepairPhotos(repairId, files, onProgress) {
 }
 
 // PC: 車検が近い車（60日以内。通知日数を60日より長くしたときはその日数まで）
+// 車検で預けられる日（トラストワンの画面に出る）。車検中の車には出さない
+const availInput = v => (v.inspection ? "" : `<label class="avail" data-act="avail"><span>預けられる日</span><input type="date" data-act="avail" data-avail="${v.id}" value="${esc(v.availDate || "")}" min="${ymd(today())}" aria-label="${esc(v.kind)} の預けられる日"></label>`);
+function setAvail(el) {
+  updateDoc(doc(db, "vehicles", el.dataset.avail), { availDate: el.value || null, updatedAt: serverTimestamp() })
+    .catch(e => { console.error(e); toast("保存できませんでした。もう一度お試しください", "err"); });
+  toast(el.value ? `預けられる日を ${fmt(el.value)} にしました` : "預けられる日を消しました");
+  el.blur();
+}
 function shakenPanel() {
   const lim = Math.max(60, alertDays());
   const soon = byShaken(shown().filter(v => daysTo(v.shakenDate) <= lim));
   const f = foldList("shaken", soon, "台");
   return `<div class="panel"><h2>車検が近い車 <span class="tag">${soon.length}台</span></h2>
-    ${soon.length ? f.shown.map(v => `<div class="li tap" data-act="edit" data-id="${v.id}" title="押すと車検満了日を変えられます">${plateHtml(v, true)}<div class="grow"><div class="t">${esc(v.kind)}</div><div class="s">${jp(v.shakenDate)}</div></div>${shakenDays(v)}</div>`).join("")
+    ${soon.length ? f.shown.map(v => `<div class="li tap" data-act="edit" data-id="${v.id}" title="押すと車検満了日を変えられます">${plateHtml(v, true)}<div class="grow"><div class="t">${esc(v.kind)}</div><div class="s">${jp(v.shakenDate)}</div></div>${shakenDays(v)}${availInput(v)}</div>`).join("")
       + f.more : `<div class="empty">${lim}日以内の車検はありません</div>`}
   </div>`;
 }
@@ -1032,6 +1047,7 @@ function repairPanel() {
       return `<div class="li"><div class="grow">
           <div class="t">${r.status === "in_repair" ? '<span class="tag inrep">修理中</span> ' : ""}${esc(repairText(r))}</div>
           <div class="s">${repairKind(r)}　${repairDate(r)}　${esc(r.reportedBy || "")}</div>
+          ${r.shop ? `<div class="s shopnote">${shopText(r)}</div>` : (r.availDate ? `<div class="s">預けられる日 ${fmt(r.availDate)}</div>` : "")}
           ${photos.length ? `<div class="rthumbs">${photos.map(p => `<a href="${esc(p.photoUrl)}" target="_blank" rel="noopener" title="大きく見る"><img src="${esc(p.thumbUrl || p.photoUrl)}" alt="修理の写真" loading="lazy"></a>`).join("")}</div>` : ""}
         </div><div class="rbtns">${btns}</div></div>`;
     }).join("") + f.more : `<div class="empty">未対応の依頼はありません</div>`}
@@ -1165,17 +1181,29 @@ function showSetTab(k) {
 
 // 設定 → 通知：名簿の人が行、4つの通知が列。チェックでオン・オフ（すぐ保存）
 let nQuery = "";
-const nVisible = () => { const q = nQuery.trim(); return activeMembers().filter(m => !q || m.name.includes(q)); };
+// トラストワンの人（専用ページで名前を入れた人）。名前は「山岡（トラストワン）」の形。届く通知は修理依頼と車検だけ
+const SHOP_TYPES = ["shaken", "repair"];
+const shortShop = n => n.replace(/（[^（）]*）$/, "");
+const nMatch = n => { const q = nQuery.trim(); return !q || n.includes(q); };
+const nVisible = () => activeMembers().filter(m => nMatch(m.name));
+const nVisibleShop = () => S.shopUsers.filter(nMatch);
 function renderNotifyTable() {
   const el = $("ntable"); if (!el) return;
   const list = nVisible();
-  if (!activeMembers().length) { el.innerHTML = `<div class="empty">名簿がまだありません。「基本」タブで名簿を取り込んでください</div>`; return; }
+  if (!activeMembers().length && !S.shopUsers.length) { el.innerHTML = `<div class="empty">名簿がまだありません。「基本」タブで名簿を取り込んでください</div>`; return; }
+  const status = n => `<small class="pst${S.tokenNames.has(n) ? " ok" : ""}">${S.tokenNames.has(n) ? "スマホ許可済み" : "未許可"}</small>`;
+  const shop = nVisibleShop().sort((a, b) => a.localeCompare(b, "ja"));
+  const shopRows = !shop.length ? "" : `<tr class="ngrp"><td colspan="5">${SHOP_NAME}</td></tr>` + shop.map(n => `<tr>
+      <td class="nname"><b>${esc(shortShop(n))}</b>${status(n)}</td>
+      ${NTYPES.map(([k, l]) => (SHOP_TYPES.includes(k)
+        ? `<td><input type="checkbox" data-ntype="${k}" data-name="${esc(n)}"${(S.notify[k] || []).includes(n) ? " checked" : ""} aria-label="${esc(n)} ${l}"></td>`
+        : `<td class="nna">—</td>`)).join("")}</tr>`).join("");
   const rows = MGROUPS.map(g => {
     const ms = list.filter(m => mGroupOf(m) === g).sort((a, b) => byLen(a.name, b.name));
     return !ms.length ? "" : `<tr class="ngrp"><td colspan="5">${g}</td></tr>` + ms.map(m => `<tr>
-      <td class="nname"><b>${esc(m.name)}</b><small class="pst${S.tokenNames.has(m.name) ? " ok" : ""}">${S.tokenNames.has(m.name) ? "スマホ許可済み" : "未許可"}</small></td>
+      <td class="nname"><b>${esc(m.name)}</b>${status(m.name)}</td>
       ${NTYPES.map(([k, l]) => `<td><input type="checkbox" data-ntype="${k}" data-name="${esc(m.name)}"${(S.notify[k] || []).includes(m.name) ? " checked" : ""} aria-label="${esc(m.name)} ${l}"></td>`).join("")}</tr>`).join("");
-  }).join("");
+  }).join("") + shopRows;
   el.innerHTML = `<table class="ntable"><thead><tr><th>名前</th>${NTYPES.map(([k, l, when]) =>
     `<th>${l}<small>${when()}</small><div class="nall"><button type="button" class="btn ghost small" data-act="nAll" data-val="${k}" data-id="on">全員オン</button><button type="button" class="btn ghost small" data-act="nAll" data-val="${k}" data-id="off">全員オフ</button></div></th>`).join("")}</tr></thead>
     <tbody>${rows || `<tr><td colspan="5"><div class="empty">該当する名前がありません</div></td></tr>`}</tbody></table>`;
@@ -1187,7 +1215,7 @@ function setNotify(type, names, on) {
 }
 // 列ごとの「全員オン」「全員オフ」（名前で探しているときは、出ている人だけ）
 function setNotifyAll(type, on) {
-  const names = nVisible().map(m => m.name);
+  const names = [...nVisible().map(m => m.name), ...(SHOP_TYPES.includes(type) ? nVisibleShop() : [])];
   const label = NTYPES.find(t => t[0] === type)[1];
   if (!confirm(`「${label}」の通知を、${nQuery.trim() ? `表示している ${names.length}人` : `全員（${names.length}人）`}${on ? "オン" : "オフ"}にしますか？`)) return;
   setNotify(type, names, on);
@@ -1416,7 +1444,7 @@ function saveInspOut(f) {
     oldShakenDate: v.shakenDate, newShakenDate: null, outBy: operator(), backBy: null, returnedLot: null,
     outAt: serverTimestamp(), backAt: null,
   });
-  b.update(doc(db, "vehicles", v.id), { inspection: { id: rec.id, from, until }, updatedAt: serverTimestamp() });
+  b.update(doc(db, "vehicles", v.id), { inspection: { id: rec.id, from, until }, availDate: null, updatedAt: serverTimestamp() });
   b.commit().catch(e => { console.error(e); toast("車検に出せませんでした。もう一度お試しください", "err"); });
   closeModal();
   toast("車検に出しました");
@@ -1454,7 +1482,7 @@ function saveInspBack(f) {
   if (date <= v.shakenDate) return showFerr(`新しい車検満了日は、今の満了日（${jp(v.shakenDate)}）より後にしてください`);
   if (!lot) return showFerr("置き場所を選んでください");
   const b = writeBatch(db);
-  b.update(doc(db, "vehicles", v.id), { shakenDate: date, currentLot: lot, inspection: null, updatedAt: serverTimestamp() });
+  b.update(doc(db, "vehicles", v.id), { shakenDate: date, currentLot: lot, inspection: null, availDate: null, updatedAt: serverTimestamp() });
   if (v.inspection.id) b.set(doc(db, "inspections", v.inspection.id), {
     vehicleId: v.id, backDate: ymd(today()), newShakenDate: date, backBy: operator(), returnedLot: lot, backAt: serverTimestamp(),
   }, { merge: true });
@@ -1681,6 +1709,7 @@ document.addEventListener("click", e => {
     case "memAdd": addMember(); break;
     case "retire": retireVehicle(modalId); break;
     case "restore": restoreVehicle(id); break;
+    case "avail": break; // 預けられる日の欄（押しても車の修正画面を開かない）
     case "inspOut": openInspOut(id); break;
     case "inspBack": openInspBack(id); break;
     case "shkPlus": shakenPlus(val); break;
@@ -1701,6 +1730,7 @@ document.addEventListener("change", e => {
   }
   if (el.id === "io-from" || el.id === "io-until") resetInspConfirm(); // 車検に出す：日付を変えたら確認し直す
   if (el.id === "f-photo") pickFormPhoto(el); // PCの登録フォーム（保存を押したときに送る）
+  if (el.dataset && el.dataset.avail) setAvail(el); // PC：車検が近い車の「預けられる日」
   if (el.dataset && el.dataset.ntype) setNotify(el.dataset.ntype, [el.dataset.name], el.checked); // PCの設定 → 通知
   if (el.dataset && el.dataset.pref) setMyPref(el.dataset.pref, el.checked); // スマホの「🔔 通知」
 });
@@ -1726,6 +1756,7 @@ $("ph-screen").addEventListener("input", e => {
   if (e.target.id === "whoSearch") { form.whoQ = e.target.value; $("whoList").innerHTML = nameChips(form.whoQ, form.who, "pickWho"); return; }
   const n = e.target.name;
   if (ui.screen.name === "repair" && n === "memo") rform.memo = e.target.value;
+  if (ui.screen.name === "repair" && n === "avail") rform.avail = e.target.value;
   if (ui.screen.name === "reserve" && ["who", "site", "siteOther"].includes(n)) form[n] = e.target.value;
 });
 $("ph-screen").addEventListener("change", e => {
@@ -1812,6 +1843,9 @@ function startSync() {
   onSnapshot(doc(db, "settings", "notify"), d => { S.notify = d.data() || {}; S.notifyLoaded = true; refresh(); renderNotifyTable(); }, nwarn);
   onSnapshot(collection(db, "notifyPrefs"), snap => {
     S.prefs = new Map(snap.docs.map(d => [d.get("name"), new Set(d.get("off") || [])])); refresh();
+  }, nwarn);
+  onSnapshot(collection(db, "shopUsers"), snap => {
+    S.shopUsers = [...new Set(snap.docs.map(d => d.get("name")).filter(Boolean))]; renderNotifyTable();
   }, nwarn);
   onSnapshot(collection(db, "pushTokens"), snap => {
     S.tokenNames = new Set(snap.docs.map(d => d.get("name")).filter(Boolean)); renderNotifyTable();

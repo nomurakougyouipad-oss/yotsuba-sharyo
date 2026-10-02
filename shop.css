@@ -1,0 +1,97 @@
+/* よつば車両 整備（トラストワン用ページ）— 見た目は shop-proto.html（試作）の CSS をそのまま使用。末尾に実機用を追加 */
+:root{
+  --head:#2C4966; --bg:#EEF0EC; --card:#FFFFFF; --fg:#1F2A33; --sub:#5E6A72; --line:#D9DDD6;
+  --free:#2E9E5B; --use:#E08A1E; --fix:#C8443A; --insp:#7A5BB5; --shop:#2C4966;
+  --chip:#F2F4F0; --btn-fg:#FFFFFF; --shadow:0 1px 2px rgba(31,42,51,.08);
+  --font:"Zen Kaku Gothic New","Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --head:#1E3247; --bg:#171B20; --card:#22282F; --fg:#E7EAEC; --sub:#9AA5AD; --line:#343C44;
+  --free:#3FB872; --use:#F0A040; --fix:#E0645A; --insp:#A58BE0; --shop:#7FA3C8;
+  --chip:#2B323A; --btn-fg:#FFFFFF; --shadow:none; color-scheme:dark }}
+:root[data-theme="dark"]{
+  --head:#1E3247; --bg:#171B20; --card:#22282F; --fg:#E7EAEC; --sub:#9AA5AD; --line:#343C44;
+  --free:#3FB872; --use:#F0A040; --fix:#E0645A; --insp:#A58BE0; --shop:#7FA3C8;
+  --chip:#2B323A; --btn-fg:#FFFFFF; --shadow:none; color-scheme:dark }
+*{box-sizing:border-box}
+html,body{height:100%}
+body{background:var(--bg);color:var(--fg);font-family:var(--font);font-size:16px;margin:0}
+.app{max-width:480px;margin:0 auto;min-height:100%;display:flex;flex-direction:column;background:var(--bg)}
+header{background:var(--head);color:#fff;padding:14px 16px 12px;position:sticky;top:env(safe-area-inset-top,0px);z-index:5}
+header .row{display:flex;justify-content:space-between;align-items:center;gap:8px}
+header h1{font-size:19px;font-weight:900;margin:0;letter-spacing:.02em}
+header .who{font-size:13px;background:rgba(255,255,255,.14);padding:4px 10px;border-radius:99px}
+.sample{font-size:12px;color:var(--sub);text-align:center;padding:8px 16px 0}
+main{flex:1;padding:8px 16px calc(96px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:22px}
+section h2{font-size:15px;font-weight:700;margin:0 0 10px;display:flex;align-items:center;gap:8px;color:var(--sub)}
+section h2 .n{background:var(--chip);color:var(--fg);border-radius:99px;font-size:13px;padding:1px 9px;font-variant-numeric:tabular-nums}
+.list{display:flex;flex-direction:column;gap:10px}
+.card{background:var(--card);border-radius:12px;box-shadow:var(--shadow);overflow:hidden;border:1px solid var(--line)}
+.band{color:#fff;font-size:13px;font-weight:700;padding:5px 12px;display:flex;justify-content:space-between;gap:8px}
+.band .r{font-weight:500;font-variant-numeric:tabular-nums}
+.body{padding:12px;display:flex;flex-direction:column;gap:8px}
+.pic{aspect-ratio:16/9;max-width:100%;max-height:180px;width:100%;background:var(--chip);border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:var(--sub);font-size:12px}
+.pic svg{width:96px;height:auto}
+.top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.plate{border:2px solid var(--fg);border-radius:6px;padding:2px 8px;font-weight:700;font-size:15px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.kind{font-size:14px;color:var(--sub)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips span{background:var(--chip);border-radius:99px;font-size:13px;padding:3px 10px}
+.memo{font-size:14px;line-height:1.6;margin:0}
+.meta{font-size:13px;color:var(--sub);margin:0}
+.wish{display:flex;justify-content:space-between;align-items:center;gap:8px;background:var(--chip);border-radius:8px;padding:8px 10px;font-size:14px}
+.wish b{font-size:16px;font-variant-numeric:tabular-nums}
+.wish.none{color:var(--sub)}
+.btn{appearance:none;border:0;border-radius:10px;min-height:48px;font:700 16px var(--font);color:var(--btn-fg);cursor:pointer;width:100%}
+.btn:focus-visible,.lot:focus-visible,.tab:focus-visible,.plus:focus-visible{outline:3px solid var(--use);outline-offset:2px}
+.btn.ghost{background:transparent;color:var(--fg);border:1px solid var(--line)}
+.empty{font-size:14px;color:var(--sub);background:var(--card);border:1px dashed var(--line);border-radius:12px;padding:16px;text-align:center}
+nav{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);padding:6px 0 calc(6px + env(safe-area-inset-bottom,0px));z-index:5}
+nav .in{max-width:480px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr}
+.tab{appearance:none;background:none;border:0;font:700 14px var(--font);color:var(--sub);display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 0;cursor:pointer;position:relative}
+.tab .ic{font-size:22px;line-height:1}
+.tab[aria-selected="true"]{color:var(--head)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .tab[aria-selected="true"]{color:var(--shop)}}
+:root[data-theme="dark"] .tab[aria-selected="true"]{color:var(--shop)}
+.badge{position:absolute;top:2px;left:calc(50% + 10px);background:var(--fix);color:#fff;font-size:11px;border-radius:99px;min-width:18px;padding:1px 5px;font-variant-numeric:tabular-nums}
+/* sheet */
+.veil{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:20;display:flex;align-items:flex-end;justify-content:center}
+.sheet{background:var(--card);width:100%;max-width:480px;border-radius:16px 16px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:14px;max-height:90%;overflow:auto}
+.sheet h3{margin:0;font-size:18px}
+.field{display:flex;flex-direction:column;gap:6px}
+.field label,.field .lb{font-size:14px;font-weight:700}
+.field input[type=date],.field textarea{font:16px var(--font);padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);width:100%}
+.field textarea{min-height:70px;resize:vertical}
+.now{font-size:13px;color:var(--sub)}
+.plusrow{display:flex;gap:8px}
+.plus{flex:1;appearance:none;border:1px solid var(--line);background:var(--chip);color:var(--fg);border-radius:8px;min-height:44px;font:700 15px var(--font);cursor:pointer}
+.lots{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.lot{appearance:none;border:2px solid var(--line);background:var(--card);color:var(--fg);border-radius:10px;min-height:52px;font:700 15px var(--font);cursor:pointer}
+.lot[aria-pressed="true"]{border-color:var(--free);background:var(--chip)}
+.photo{font-size:14px}
+.err{color:var(--fix);font-size:14px;margin:0}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:99px;font-size:14px;z-index:30;max-width:calc(100% - 32px)}
+@media (prefers-reduced-motion:no-preference){.sheet{animation:up .18s ease-out}@keyframes up{from{transform:translateY(24px);opacity:.6}to{transform:none;opacity:1}}}
+
+/* ---- ここから実機用の追加 ---- */
+[hidden]{display:none!important} /* .veil・.badge などの display より hidden を優先 */
+header{padding-top:calc(14px + env(safe-area-inset-top,0px));top:0}
+header .who{border:0;color:#fff;font:inherit;font-size:13px;cursor:pointer}
+.pic.has-photo{padding:0;overflow:hidden}
+.pic img{width:100%;height:100%;object-fit:contain;display:block}
+.pic svg{color:#39424d}
+.loading{font-size:15px;color:var(--sub);text-align:center;padding:40px 0}
+/* 初めて開いたとき：名前を入れる */
+.hello{display:flex;flex-direction:column;gap:14px;padding-top:24px}
+.hello h2{font-size:20px;margin:0}
+.hello p{margin:0;color:var(--sub);font-size:14px}
+.field input[type=text]{font:18px var(--font);padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--fg);width:100%}
+.sheet .field input[type=text]{background:var(--bg)}
+.btn.main{background:var(--head)}
+/* 通知をオンにする */
+.pushbtn{appearance:none;width:100%;min-height:52px;border:2px solid var(--head);border-radius:12px;background:var(--card);color:var(--head);font:900 17px var(--font);cursor:pointer}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .pushbtn{border-color:var(--shop);color:var(--shop)}}
+.pushnote{margin:0;color:var(--sub);font-size:14px;text-align:center}
+/* 車検で預かる：期間に予約があるとき */
+.clash{background:var(--chip);border-left:4px solid var(--use);border-radius:8px;padding:10px 12px;font-size:14px;display:flex;flex-direction:column;gap:4px}
+.clash b{color:var(--use)}

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2C4966">
+<link rel="manifest" href="shop.webmanifest">
+<link rel="icon" href="icons/favicon-32.png?v=2" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png?v=2">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="よつば車両 整備">
+<title>よつば車両 整備</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&display=swap">
+<link rel="stylesheet" href="shop.css">
+</head>
+<body>
+<!-- 整備工場（トラストワン）用のページ。社員用（index.html）とは別。予約・名簿・設定・車両の登録はここには置かない -->
+<div class="app">
+  <header>
+    <div class="row"><h1>よつば車両 整備</h1><button class="who" id="who" data-act="name" hidden>トラストワン</button></div>
+  </header>
+  <main id="main"><div class="loading">読み込み中…</div></main>
+</div>
+<nav id="nav" hidden><div class="in" role="tablist">
+  <button class="tab" id="t-fix" role="tab" aria-selected="true" data-act="tab" data-val="fix"><span class="ic">🔧</span>修理<span class="badge" id="b-fix" hidden></span></button>
+  <button class="tab" id="t-insp" role="tab" aria-selected="false" data-act="tab" data-val="insp"><span class="ic">📋</span>車検<span class="badge" id="b-insp" hidden></span></button>
+</div></nav>
+<div id="toast" class="toast" role="status" hidden></div>
+<div id="veil" class="veil" hidden><div class="sheet" id="sheet" role="dialog" aria-modal="true"></div></div>
+<noscript><p style="text-align:center">JavaScript を有効にしてください</p></noscript>
+<script type="module" src="shop.js"></script>
+</body>
+</html>

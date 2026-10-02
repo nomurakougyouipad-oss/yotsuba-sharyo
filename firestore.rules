@@ -19,6 +19,9 @@ service cloud.firestore {
     function optStr(d, k, max) {
       return !(k in d) || d[k] == null || (d[k] is string && d[k].size() <= max);
     }
+    function optDate(d, k) {
+      return !(k in d) || d[k] == null || isDate(d[k]);
+    }
     function isSample() {
       return resource.data.get('sample', false) == true;
     }
@@ -46,6 +49,7 @@ service cloud.firestore {
         && optStr(d, 'owner', 40)
         && (!('hidden' in d) || d.hidden is bool)
         && (!('inspection' in d) || d.inspection == null || validInspState(d.inspection))
+        && optDate(d, 'availDate')
         && d.retired is bool;
     }
     // 車検中の印（vehicles の inspection）：出した日・戻り予定日（任意）・記録のID
@@ -86,7 +90,14 @@ service cloud.firestore {
         && (!('symptoms' in d) || (d.symptoms is list && d.symptoms.size() <= 20))
         && optStr(d, 'memo', 2000)
         && (!('photoUrls' in d) || (d.photoUrls is list && d.photoUrls.size() <= 20))
-        && optStr(d, 'reportedBy', 40);
+        && optStr(d, 'reportedBy', 40)
+        && optDate(d, 'availDate')
+        && (!('shop' in d) || d.shop == null || validShopHold(d.shop))
+        && (!('shopDone' in d) || d.shopDone == null || d.shopDone is map);
+    }
+    // トラストワン（整備工場）が修理で預かった：預かった日・戻せる予定の日・預かった人
+    function validShopHold(x) {
+      return x is map && isDate(x.from) && (!('until' in x) || x.until == null || isDate(x.until)) && optStr(x, 'by', 60);
     }
     match /repairs/{repairId} {
       allow read: if signedIn();
@@ -95,9 +106,6 @@ service cloud.firestore {
     }
 
     // ---- 車検の記録（車検に出す・戻す。あとで車屋さん用の画面で使う） ----
-    function optDate(d, k) {
-      return !(k in d) || d[k] == null || isDate(d[k]);
-    }
     function validInspection(d) {
       return d.keys().hasAll(['vehicleId', 'outDate'])
         && str(d.vehicleId, 100)
@@ -158,13 +166,22 @@ service cloud.firestore {
         && request.resource.data.off is list && request.resource.data.off.size() <= 4;
     }
     // 通知を許可した端末（ID が通知トークン）。名前とひもづける。1人が複数の端末でもよい
+    // app: "shop" はトラストワンのページ（通知を押すと shop.html が開く）
     match /pushTokens/{token} {
       allow read: if signedIn();
       allow create, update: if signedIn() && token.size() <= 1000
-        && request.resource.data.keys().hasOnly(['name', 'platform', 'updatedAt'])
+        && request.resource.data.keys().hasOnly(['name', 'platform', 'app', 'updatedAt'])
         && str(request.resource.data.name, 40)
+        && (!('app' in request.resource.data) || request.resource.data.app in ['staff', 'shop'])
         && optStr(request.resource.data, 'platform', 20);
       allow delete: if signedIn();
+    }
+    // トラストワンの人（専用ページで名前を入れた人）。PCの通知の設定に「トラストワン」として出す
+    match /shopUsers/{userId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn()
+        && request.resource.data.keys().hasOnly(['name', 'shop', 'updatedAt'])
+        && str(request.resource.data.name, 40) && optStr(request.resource.data, 'shop', 30);
     }
     // notifyLog（送った記録）は Cloud Functions だけが読み書きする
 
