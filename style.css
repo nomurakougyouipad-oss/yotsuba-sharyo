@@ -196,7 +196,7 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:3px solid v
    ===================================================================== */
 
 /* ---- スマホ実機: 枠なしで画面いっぱい。ステータスバー・ホームバーと重ならない ---- */
-@media (max-width:899px){
+@media (max-width:899px), (max-height:500px){
   .switch{display:none}
   .phone{position:fixed;inset:0;width:100%;height:auto;margin:0;border:0;border-radius:0}
   .phone header{padding-top:calc(14px + env(safe-area-inset-top,0px));padding-left:max(18px,env(safe-area-inset-left,0px));padding-right:max(18px,env(safe-area-inset-right,0px))}
@@ -325,7 +325,7 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
 .tabs button{position:relative;justify-content:center;min-height:60px;padding:6px 0;gap:3px;font-size:13px;line-height:1.1}
 .tabs button .ic{font-size:26px}
 .tabs button .badge{top:5px;left:50%;margin:0 0 0 8px;min-width:20px;text-align:center;font-size:12px;padding:1px 6px}
-@media (max-width:899px){
+@media (max-width:899px), (max-height:500px){
   /* ホームバーは下から約13px。その上に文字が来るよう、余白は iPhone の値から10px減らす（最低6px） */
   .tabs{padding-bottom:max(6px,calc(var(--sab) - 10px))}
   .screen{padding-bottom:calc(84px + var(--sab))}
@@ -336,7 +336,7 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
 }
 
 /* スマホ：画面の端でページ全体が引っぱられて、下のタブまで一緒に動かないように（一覧のスクロールはそのまま） */
-@media (max-width:899px){
+@media (max-width:899px), (max-height:500px){
   html,body{overscroll-behavior:none}
   .screen{overscroll-behavior-y:contain}
 }
@@ -435,23 +435,9 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
 #ph-screen .chips.four:not(.types) .chip{font-size:clamp(13px,4vw,16px);padding:4px 3px}
 .band.mine,.status-pill.mine{background:var(--steel)}
 
-/* ---- 予約：日を押して選ぶカレンダー ---- */
-.pcal{border:1.5px solid var(--line);border-radius:14px;padding:10px}
-.pcal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
-.pcal-head b{font-size:17px}
+/* ---- 月の切り替えボタン（車の詳細のカレンダー） ---- */
 .pcal-nav{width:44px;height:44px;border:1.5px solid var(--line-strong);border-radius:10px;background:var(--paper);font-size:22px;line-height:1}
 .pcal-nav:disabled{opacity:.35;cursor:default}
-.pcal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
-.pd{min-width:0;aspect-ratio:1;min-height:40px;display:flex;align-items:center;justify-content:center;border:1.5px solid var(--line);border-radius:10px;background:var(--paper);font-size:16px;font-weight:700;padding:0}
-.pd.dow,.pd.blank{border:0;background:none;min-height:0;aspect-ratio:auto;font-size:12px;color:var(--mute);font-weight:500;padding:2px 0}
-.pd.on{background:var(--steel-t);border-color:var(--steel-t);color:var(--steel-t-ink)}
-.pd.taken{background:var(--line);border-color:var(--line);color:var(--mute);text-decoration:line-through;cursor:not-allowed}
-.pd.past{background:none;border-color:transparent;color:var(--mute);opacity:.45;cursor:not-allowed}
-.pd.today{outline:2px solid var(--ink);outline-offset:-2px}
-.pcal-legend{display:flex;gap:14px;font-size:12px;color:var(--mute);margin-top:8px}
-.pcal-legend i{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;margin-right:4px}
-.lg-on{background:var(--steel-t)} .lg-taken{background:var(--line)}
-.pcal-sel{margin-top:8px;font-weight:700;font-size:15px;overflow-wrap:anywhere}
 /* ---- この車の予約（取り消し） ---- */
 .reslist{margin-top:16px}
 .reslist h3{font-size:15px;margin:0 0 6px;font-weight:700}
@@ -531,3 +517,178 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
 .avail span{white-space:nowrap}
 .avail input{width:auto;padding:3px 6px;font-size:13px;border-radius:7px}
 .ntable td.nna{color:var(--mute)}
+
+/* =====================================================================
+   空き表（aki-chart.html の試作どおり）・予約のカレンダー（yoyaku-range.html の試作どおり）
+   ===================================================================== */
+:root{
+  --a-today:#FFF4E2; --a-wkend:#F6F7F4; --a-sat:#3E6FB0; --a-sun:#C8443A; --a-line2:#C9CEC6; --a-chip:#F2F4F0;
+  --range:#DDF1E4; --busy-fg:#A3A9A2;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --a-today:#3A3226; --a-wkend:#1E2329; --a-sat:#7FA3D8; --a-sun:#E0786F; --a-line2:#424A53; --a-chip:#2B323A;
+    --range:#1F3A2A; --busy-fg:#5F6870;
+  }
+}
+:root[data-theme="dark"]{
+  --a-today:#3A3226; --a-wkend:#1E2329; --a-sat:#7FA3D8; --a-sun:#E0786F; --a-line2:#424A53; --a-chip:#2B323A;
+  --range:#1F3A2A; --busy-fg:#5F6870;
+}
+
+/* ---- PC：いちばん上のタブ（今日の状況・空き表） ---- */
+.pctabs{display:flex;gap:4px;border-bottom:1.5px solid var(--line);margin:4px 0 6px}
+.pctabs button{background:none;border:0;border-bottom:3px solid transparent;margin-bottom:-1.5px;padding:10px 20px;font-weight:900;font-size:16px;color:var(--mute)}
+.pctabs button.on{color:var(--steel-t);border-bottom-color:var(--steel-t)}
+
+/* ---- 空き表：全体（スマホは表の中だけスクロール。PC は画面の高さに合わせる） ---- */
+.aki{display:flex;flex-direction:column;gap:10px;min-height:0}
+#ph-screen.aki-mode{display:flex;flex-direction:column;overflow:hidden;padding-top:10px}
+#ph-screen .aki{flex:1;gap:8px}
+#ph-screen .a-board{flex:1;min-height:0}
+#ph-screen .aki-scroll{height:100%}
+.aki.pc .aki-scroll{max-height:calc(100vh - 250px);max-height:calc(100dvh - 250px);min-height:320px}
+/* 種類の絞り込み：今のアプリのタブと同じ角丸の四角。台数は下に */
+.chips.aki-types{margin-bottom:0;max-width:560px}
+.aki-types .chip{flex-direction:column;flex-wrap:nowrap;row-gap:1px;min-height:52px}
+.aki-types .chip .n{font-size:12px}
+#ph-screen .aki-types .chip{min-height:48px}
+.a-legend{display:flex;flex-wrap:wrap;gap:6px 12px;font-size:13px;color:var(--mute)}
+#ph-screen .a-legend{gap:4px 9px;font-size:12px}
+.a-legend span{display:inline-flex;align-items:center;gap:5px}
+.a-legend i{width:14px;height:10px;border-radius:3px;display:inline-block}
+.a-legend i.use{background:var(--use)} .a-legend i.fix{background:var(--fix)} .a-legend i.insp{background:var(--insp)}
+.a-legend i.late{background:var(--use);box-shadow:inset 0 0 0 2px var(--fix)}
+.a-legend i.free{background:var(--paper);border:1px solid var(--a-line2)}
+.a-rot{margin:0;font-size:12px;color:var(--mute)}
+.a-hint{margin:0;font-size:13px;color:var(--mute)}
+
+/* ---- 空き表：表 ---- */
+.a-board{background:var(--paper);border:1.5px solid var(--line);border-radius:12px;overflow:hidden}
+.aki-scroll{overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+.a-grid{--namew:172px;--dayw:46px;--rowh:50px;display:grid;grid-template-columns:var(--namew) repeat(var(--days),var(--dayw));min-width:max-content;font-size:15px;line-height:1.2}
+#ph-screen .a-grid{--namew:132px;--dayw:42px}
+/* 止まったままにする部分：上の日付・空き台数の行、左の車の列・まとまりの見出し */
+.a-corner,.a-hd,.a-cnth,.a-cnt{position:sticky;background:var(--paper);z-index:6}
+.a-corner,.a-hd{top:0} .a-cnth,.a-cnt{top:44px}
+.a-corner,.a-cnth{left:0;z-index:8;border-right:1px solid var(--a-line2)}
+.a-corner{height:44px;display:flex;align-items:flex-end;padding:0 8px 6px;font-size:12px;color:var(--mute);border-bottom:1px solid var(--a-line2)}
+.a-hd{height:44px;text-align:center;padding-top:5px;font-size:12px;border-bottom:1px solid var(--a-line2);font-variant-numeric:tabular-nums}
+.a-hd b{display:block;font-size:15px}
+.a-hd.sat{color:var(--a-sat)} .a-hd.sun{color:var(--a-sun)}
+.a-hd.today,.a-cnt.today{background:var(--a-today)}
+.a-cnth{height:30px;display:flex;align-items:center;padding:0 8px;color:var(--free-t);font-weight:700;font-size:13px;border-bottom:2px solid var(--a-line2)}
+.a-cnt{height:30px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;border-bottom:2px solid var(--a-line2);color:var(--free-t);font-variant-numeric:tabular-nums}
+.a-cnt.low{color:var(--fix-t)}
+.a-name{position:sticky;left:0;z-index:5;background:var(--paper);border-right:1px solid var(--a-line2);border-bottom:1px solid var(--line);padding:5px 8px;display:flex;align-items:center;gap:7px;height:var(--rowh);cursor:pointer}
+.a-name:focus-visible{outline:3px solid var(--use);outline-offset:-3px}
+.a-thumb{flex:none;display:flex}
+.a-thumb .thumb{width:40px;height:30px;border-radius:5px}
+.a-thumb .thumb svg{width:34px}
+.aplate{background:#fff;color:#1E6B3A;border:1.5px solid #1E6B3A;border-radius:5px;padding:1px 6px 2px;line-height:1.05;display:inline-flex;flex-direction:column;align-items:center;min-width:86px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.aplate .t{font-size:9.5px;font-weight:700;letter-spacing:.06em}
+.aplate .b{display:flex;align-items:baseline;gap:3px}
+.aplate .h{font-size:10px;font-weight:700}
+.aplate .n{font-size:16px;font-weight:900;letter-spacing:.02em}
+.a-gname{position:sticky;left:0;z-index:5;background:var(--a-chip);font-size:13px;font-weight:700;color:var(--mute);padding:4px 10px;border-bottom:1px solid var(--line);border-right:1px solid var(--a-line2)}
+.a-gtrack{grid-column:2 / -1;background:var(--a-chip);border-bottom:1px solid var(--line)}
+/* 1台の行：日の区切り線と土日・今日の色は背景で描く（--daybg は JS で作る） */
+.a-track{grid-column:2 / -1;display:grid;grid-template-columns:repeat(var(--days),var(--dayw));border-bottom:1px solid var(--line);height:var(--rowh);cursor:pointer;
+  background:repeating-linear-gradient(90deg,transparent 0 calc(var(--dayw) - 1px),var(--line) calc(var(--dayw) - 1px) var(--dayw)),var(--daybg)}
+.a-blk:focus-visible{outline:3px solid var(--use);outline-offset:-2px}
+/* 帯：予約・使用中＝オレンジ、修理中＝赤、車検中＝紫、返却遅れ＝赤いふち＋しま模様。横にずらしても名前は左はしに残る */
+.a-blk{grid-row:1;align-self:center;margin:0 2px;height:36px;border-radius:7px;color:#fff;font-size:12px;font-weight:700;line-height:1.2;padding:2px 7px;text-align:left;overflow:hidden;overflow:clip;white-space:nowrap;border:0;cursor:pointer;z-index:2;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;min-width:0}
+/* ↑ overflow:clip にする（hidden だと帯そのものが基準になり、名前が左はしに残らない） */
+.a-blk span,.a-blk small{overflow:hidden;text-overflow:ellipsis;position:sticky;left:calc(var(--namew) + 6px);max-width:100%}
+.a-blk small{font-weight:500;opacity:.92;font-size:12px}
+.a-blk.use{background:var(--use)} .a-blk.fix{background:var(--fix)} .a-blk.insp{background:var(--insp)}
+.a-blk.late{box-shadow:inset 0 0 0 3px var(--fix);background:repeating-linear-gradient(135deg,var(--use) 0 8px,color-mix(in srgb,var(--use) 82%,var(--fix)) 8px 16px)}
+.a-blk .lt{font-size:10.5px;font-weight:900;background:var(--fix);color:#fff;border-radius:4px;padding:0 4px;margin-right:4px;display:inline-block;font-style:normal}
+.a-blk.cont-l{border-top-left-radius:0;border-bottom-left-radius:0;margin-left:0}
+.a-blk.cont-r{border-top-right-radius:0;border-bottom-right-radius:0;margin-right:0}
+
+/* ---- 空き表：スマホ横向き（見出しや色の説明を隠して、表を大きく） ---- */
+@media (orientation:landscape){ .a-rot{display:none} }
+@media (orientation:landscape) and (max-height:500px){
+  .phone.aki-on header{min-height:0;padding-top:calc(5px + env(safe-area-inset-top,0px));padding-bottom:5px}
+  .phone.aki-on header h1{font-size:16px}
+  .phone.aki-on .tabs button{min-height:40px;flex-direction:row;gap:6px;padding:4px 0}
+  .phone.aki-on .tabs button .ic{font-size:18px}
+  #ph-screen.aki-mode{padding-top:6px;padding-bottom:calc(52px + max(0px,calc(var(--sab) - 10px)))}
+  #ph-screen .aki{gap:6px}
+  #ph-screen .a-legend{display:none}
+  #ph-screen .aki-types .chip{min-height:36px;flex-direction:row;column-gap:6px;font-size:14px}
+  #ph-screen .a-grid{--rowh:40px}
+  #ph-screen .a-blk{height:30px}
+}
+
+/* ---- 空き表：押したときに下から出る小さな画面 ---- */
+.aveil{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:55;display:flex;align-items:flex-end;justify-content:center}
+.asheet{background:var(--paper);color:var(--ink);width:100%;max-width:480px;border-radius:16px 16px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:12px;max-height:90vh;overflow:auto}
+@media (min-width:700px) and (min-height:501px){.aveil{align-items:center}.asheet{border-radius:16px}}
+.asheet h3{margin:0;font-size:18px}
+.asheet p{margin:0;line-height:1.6;overflow-wrap:anywhere}
+.asheet .vtags{margin:0}
+.a-who{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.a-who .thumb{width:64px;height:46px;border-radius:8px}
+.a-who .thumb svg{width:54px}
+.a-who .m{font-size:14px;color:var(--mute)}
+.a-late{color:var(--fix-t);font-weight:700}
+.abtn{border:0;border-radius:10px;min-height:48px;font-size:16px;font-weight:700;width:100%}
+.abtn.go{background:var(--free);color:#fff}
+.abtn.go.steel{background:var(--steel);color:#fff}
+.abtn.ghost{background:transparent;color:var(--ink);border:1.5px solid var(--line-strong)}
+
+/* ---- 予約：借りる日 → 返す日 の2回押して期間を選ぶカレンダー ---- */
+.rc{display:flex;flex-direction:column;gap:10px}
+.rc-pick{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:8px;background:var(--paper);border:1.5px solid var(--line);border-radius:12px;padding:10px 12px}
+.rc-box{display:flex;flex-direction:column;gap:2px;padding:6px 8px;border-radius:8px;border:2px solid transparent;min-width:0}
+.rc-box.on{border-color:var(--free)}
+.rc-box .lb{font-size:12px;color:var(--mute);font-weight:700}
+.rc-box .v{font-size:18px;font-weight:900;font-variant-numeric:tabular-nums;white-space:nowrap}
+.rc-box .v.empty{color:var(--busy-fg);font-weight:500;font-size:16px}
+.rc-arrow{color:var(--mute)}
+.rc-sum{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.rc-days{margin:0;font-weight:700;color:var(--free-t);min-width:0}
+.rc-days small{display:block;font-size:13px;font-weight:500;color:var(--mute)}
+.rc-clr{flex:none;min-height:40px;padding:0 14px;border:1.5px solid var(--line-strong);border-radius:10px;background:var(--paper);font-size:14px;font-weight:700}
+.rc-clr:disabled{opacity:.4;cursor:default}
+.rc-msg{margin:0;font-size:14px;font-weight:700;color:var(--fix-t);overflow-wrap:anywhere}
+.rc-cal{background:var(--paper);border:1.5px solid var(--line);border-radius:12px;padding:12px 8px}
+.rc-cal h3{font-size:16px;margin:0 0 8px 6px}
+.rc-wk,.rc-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr))}
+.rc-wk div{text-align:center;font-size:12px;color:var(--mute);padding-bottom:4px}
+.rc-wk .sun{color:var(--a-sun)} .rc-wk .sat{color:var(--a-sat)}
+.rc-d{position:relative;height:46px;display:flex;align-items:center;justify-content:center;min-width:0}
+.rc-d button{appearance:none;border:0;background:transparent;width:42px;height:42px;max-width:100%;border-radius:50%;padding:0;font-size:16px;font-weight:700;color:var(--ink);position:relative;z-index:1;font-variant-numeric:tabular-nums}
+.rc-d button:focus-visible{outline:3px solid var(--use);outline-offset:1px}
+.rc-d.sun button{color:var(--a-sun)} .rc-d.sat button{color:var(--a-sat)}
+.rc-d.past button{color:var(--busy-fg);cursor:default}
+.rc-d.busy button{color:var(--busy-fg);text-decoration:line-through;cursor:not-allowed}
+.rc-d.busy::after{content:attr(data-why);position:absolute;bottom:0;font-size:9px;line-height:1;color:var(--busy-fg)}
+.rc-d.today button{box-shadow:inset 0 0 0 2px var(--use)}
+.rc-d.in::before{content:"";position:absolute;inset:4px 0;background:var(--range)}
+.rc-d.start::before{left:50%} .rc-d.end::before{right:50%}
+.rc-d.start.end::before{display:none}
+.rc-d.start button,.rc-d.end button{background:var(--free);color:#fff}
+.rc-legend{display:flex;gap:6px 14px;font-size:12px;color:var(--mute);flex-wrap:wrap}
+.rc-legend i{display:inline-block;width:12px;height:12px;border-radius:50%;vertical-align:-1px;margin-right:4px}
+.rc-on{background:var(--free)} .rc-today{box-shadow:inset 0 0 0 2px var(--use)}
+.rc-legend s{color:var(--busy-fg)}
+/* 続けて／飛び飛び の切り替え（2つに分かれたボタン） */
+.rc-mode{display:grid;grid-template-columns:1fr 1fr;border:1.5px solid var(--steel-t);border-radius:12px;overflow:hidden}
+.rc-mode button{min-height:48px;border:0;background:var(--paper);color:var(--steel-t);font-size:16px;font-weight:900;padding:0 8px}
+.rc-mode button+button{border-left:1.5px solid var(--steel-t)}
+.rc-mode button.on{background:var(--steel-t);color:var(--steel-t-ink)}
+/* 飛び飛び：選んだ日を並べる。カレンダーは1日ずつ緑の丸 */
+.rc-pick.multi{display:flex;flex-direction:column;gap:2px;padding:12px 14px}
+.rc-pick.multi .lb{font-size:12px;color:var(--mute);font-weight:700}
+.rc-pick.multi .v{font-size:16px;font-weight:900;line-height:1.5;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.rc-pick.multi .v b{margin-left:.8em;color:var(--free-t);white-space:nowrap}
+.rc-pick.multi .v.empty{color:var(--busy-fg);font-weight:500}
+.rc-days.sub2{color:var(--mute);font-weight:500;font-size:14px}
+.rc-d.pick button{background:var(--free);color:#fff}
+/* 下のタブは、スクロールしたカレンダーの日（z-index:1）より上に出す */
+.tabs{z-index:10}
+/* PC：予約の小さな画面 */
+.rmodal.modal{width:min(520px,100%)}

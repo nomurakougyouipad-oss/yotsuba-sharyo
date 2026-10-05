@@ -35,7 +35,7 @@ const db = initializeFirestore(fbApp, { localCache: persistentLocalCache({ tabMa
 const storage = getStorage(fbApp);
 
 /* ---------- 定数 ---------- */
-const APP_VERSION = "15"; // 版の番号（名前のメニューの下に出す）。sw.js の CACHE（sharyo-v○○）と同じ番号にする
+const APP_VERSION = "16"; // 版の番号（名前のメニューの下に出す）。sw.js の CACHE（sharyo-v○○）と同じ番号にする
 const TYPES = ["トラック", "バン", "普通車"];
 const SHOP_NAME = "トラストワン"; // 整備工場（子会社）の名前。専用ページは shop.html
 const LABEL = { free: "空き", use: "使用中", fix: "修理中", own: "専用", insp: "車検中" };
@@ -59,7 +59,8 @@ const S = {
 };
 
 /* ---------- 画面の状態 ---------- */
-const wide = matchMedia("(min-width: 900px)");
+// 広い画面＝PC。スマホを横向きにしたとき（高さが低い）は、幅があってもスマホ版のまま
+const wide = matchMedia("(min-width: 900px) and (min-height: 501px)");
 const ui = { view: "phone", tab: "cars", screen: { name: "list" }, filter: "all", tfilter: "all", retiredOpen: false, backTo: null };
 const form = {}; // 予約フォームの入力中の内容（画面を描き直しても消えないように）
 const resetForm = () => { for (const k of Object.keys(form)) delete form[k]; };
@@ -228,11 +229,12 @@ function applyView() {
   $("swPhone").classList.toggle("on", ui.view === "phone");
   $("swPc").classList.toggle("on", ui.view === "pc");
   if (ui.view !== "pc") closeModal();
+  hideSheet();
   render();
 }
 // 一覧から別の画面へ行くときはスクロール位置を覚えておき、詳細から「戻る」で一覧に戻ったら元の位置に戻す
 // （下のタブを押したときなどは一番上から）
-let listPos = null; // { tab, top }
+let listPos = null; // { tab, top, left, aki }（空き表は表の中のスクロール位置）
 // 端末の「戻る」（Android の戻るボタン・iPhone の左端からなぞる）用に、一覧以外の画面のあいだだけ履歴を1つ積んでおく
 // → 一覧以外で「戻る」を押すとアプリの「‹」と同じ動き、一覧で押すと今までどおりアプリが閉じる
 // iPhone のホーム画面アプリは端末の「戻る」がない（左端からなぞるのはアプリ側で見ている）ので履歴は使わない
@@ -244,11 +246,22 @@ if ("scrollRestoration" in history) history.scrollRestoration = "manual"; // ブ
 // 一覧に戻ったときの位置（描き直しや履歴の処理のあとにも、もう一度合わせる）
 function applyListPos() {
   const s = ui.screen;
-  if (s.name === "list" && s.restore && listPos && listPos.tab === ui.tab) $("ph-screen").scrollTop = listPos.top;
+  if (s.name === "list" && s.restore && listPos && listPos.tab === ui.tab) setScrollPos(listPos);
+}
+// 今のスクロール位置（空き表は表の中、ほかは画面全体）
+const akiScroller = () => document.querySelector(".aki-scroll");
+function scrollPos() {
+  const a = akiScroller();
+  return a ? { aki: true, top: a.scrollTop, left: a.scrollLeft } : { top: $("ph-screen").scrollTop };
+}
+function setScrollPos(p) {
+  const a = akiScroller();
+  if (p.aki) { if (a) { a.scrollTop = p.top; a.scrollLeft = p.left; } } else $("ph-screen").scrollTop = p.top;
 }
 function go(s, fromPop) {
   const sc = $("ph-screen"), wasList = ui.screen.name === "list", toList = s.name === "list";
-  if (wasList && !toList) listPos = { tab: ui.tab, top: sc.scrollTop };
+  if (wasList && !toList) listPos = { tab: ui.tab, ...scrollPos() };
+  hideSheet();
   ui.screen = s; ui.menu = false; form.err = ""; render();
   sc.scrollTop = 0; applyListPos();
   if (toList && s.restore) requestAnimationFrame(applyListPos);
@@ -260,12 +273,24 @@ function go(s, fromPop) {
 const goBack = () => go(ui.backTo || { name: "list", restore: true });
 function setTab(t) { ui.tab = t; go({ name: "list" }); }
 
-function render() { if (ui.view === "phone") renderPhone(); else renderPc(); loadImages(); }
+function render() {
+  if (ui.view === "phone") renderPhone();
+  else { renderPc(); if (ui.pcRes) renderResModal(); }
+  loadImages();
+}
 
 /* ---------- 写真の読み込み（一覧は画面に入る少し手前から、詳細は小さい写真→大きい写真） ---------- */
 const LAZY_MARGIN = "600px 0px";
-const lazyObservers = new Map();
+const lazyObservers = new Map(), lazyObserversAki = new WeakMap(); // 空き表は描き直すたびに表の枠が新しくなるので WeakMap
 function lazyObserver(root) {
+  if (root && root.classList.contains("aki-scroll")) {
+    if (!lazyObserversAki.has(root)) lazyObserversAki.set(root, new IntersectionObserver(entries => entries.forEach(e => {
+      if (!e.isIntersecting) return;
+      const img = e.target; lazyObserversAki.get(root).unobserve(img);
+      if (img.dataset.src) { img.src = img.dataset.src; img.removeAttribute("data-src"); }
+    }), { root, rootMargin: "300px" }));
+    return lazyObserversAki.get(root);
+  }
   if (!lazyObservers.has(root)) {
     const obs = new IntersectionObserver(entries => entries.forEach(e => {
       if (!e.isIntersecting) return;
@@ -279,7 +304,7 @@ function lazyObserver(root) {
 function loadImages(scope = document) {
   scope.querySelectorAll("img[data-src]").forEach(img => {
     if (!("IntersectionObserver" in window)) { img.src = img.dataset.src; img.removeAttribute("data-src"); return; }
-    lazyObserver(img.closest("#ph-screen") || null).observe(img); // スマホは一覧の枠、PC は画面全体を基準に
+    lazyObserver(img.closest(".aki-scroll") || img.closest("#ph-screen") || null).observe(img); // 空き表は表の枠、スマホは一覧の枠、PC は画面全体を基準に
   });
   scope.querySelectorAll("img[data-full]").forEach(img => {
     const full = img.dataset.full; img.removeAttribute("data-full");
@@ -293,11 +318,13 @@ function refresh() {
   const a = document.activeElement;
   const typing = a && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName) && !["file", "radio", "checkbox", "button", "submit"].includes(a.type);
   if (ui.view === "phone" && typing && $("ph-screen").contains(a)) return;
+  if (ui.view !== "phone" && typing && $("modal").contains(a)) return; // PC：予約の画面などで入力中
   if (a && a.dataset && a.dataset.avail) return; // PC：預けられる日を選んでいる途中は描き直さない
-  // データが届いて描き直しても、今のスクロール位置のまま
-  const sc = $("ph-screen"), top = sc.scrollTop;
+  // データが届いて描き直しても、今のスクロール位置のまま（空き表は表の中の位置も）
+  const sc = $("ph-screen"), top = sc.scrollTop, ak = akiScroller() && scrollPos();
   render();
   if (ui.view === "phone" && sc.scrollTop !== top) sc.scrollTop = top;
+  if (ak) setScrollPos(ak);
 }
 
 /* ================= スマホ版 ================= */
@@ -306,7 +333,10 @@ function renderPhone() {
   // 初回は名前を選んでもらう
   if (!ME) { h.innerHTML = S.membersLoaded ? `<h1>はじめに</h1>` : `<h1>社用車</h1>`; s.innerHTML = errBar() + nameScreen(true); t.hidden = true; return; }
   t.hidden = false;
-  t.innerHTML = [["cars", "🚐", "車両"], ["shaken", "📋", "車検"], ["repair", "🔧", "修理"]].map(([k, ic, l]) =>
+  // 空き表は表の中だけスクロールする（画面全体は動かさない）
+  const akiOn = ui.tab === "aki" && ui.screen.name === "list";
+  s.classList.toggle("aki-mode", akiOn); $("phone").classList.toggle("aki-on", akiOn);
+  t.innerHTML = [["cars", "🚐", "車両"], ["aki", "📅", "空き表"], ["shaken", "📋", "車検"], ["repair", "🔧", "修理"]].map(([k, ic, l]) =>
     `<button class="${ui.tab === k ? "on" : ""}" data-act="tab" data-val="${k}"><span class="ic">${ic}</span>${l}${k === "repair" && openCount() ? `<span class="badge">${openCount()}</span>` : ""}</button>`).join("");
   if (ui.screen.name === "me" || ui.screen.name === "notify") {
     ui.backTo = { name: "list", restore: true }; ui.menu = false;
@@ -320,15 +350,17 @@ function renderPhone() {
     pill = `<button class="me-pill" data-act="meMenu" aria-haspopup="menu" aria-expanded="${!!ui.menu}">${esc(ME)}</button>`
       + (ui.menu ? `<div class="me-menu" role="menu"><button role="menuitem" data-act="meEdit">名前を変える</button><button role="menuitem" data-act="goNotify">🔔 通知</button><div class="me-ver">版 ${APP_VERSION}</div></div>` : "");
     if (ui.tab === "cars") body = listCars();
+    else if (ui.tab === "aki") { title = "空き表"; body = akiHtml(false); }
     else if (ui.tab === "shaken") { title = "車検"; body = listShaken(); }
     else { title = "修理依頼"; body = listRepairs(); }
-    body = (ui.tab === "cars" ? pushBar() : "") + myBar() + body;
+    if (ui.tab !== "aki") body = (ui.tab === "cars" ? pushBar() : "") + myBar() + body;
   } else if (sc.name === "done") {
     title = ""; body = doneScreen(sc);
   } else {
     const v = byId(sc.id);
     if (!v || v.retired || v.hidden) { ui.screen = { name: "list" }; return renderPhone(); }
-    back = sc.name === "detail" ? { name: "list", restore: true } : { name: "detail", id: v.id };
+    // 空き表から開いた予約は、空き表に戻る
+    back = sc.name === "detail" ? { name: "list", restore: true } : (sc.back || { name: "detail", id: v.id });
     if (sc.name === "detail") { title = esc(v.kind); body = detail(v); }
     if (sc.name === "reserve") { title = "予約"; body = reserveForm(v); }
     if (sc.name === "return") { title = "返却"; body = returnForm(v); }
@@ -443,6 +475,135 @@ function resList(v) {
     ${canCancel(r) ? `<button class="btn ghost small" data-act="cancelRes" data-id="${r.id}">取り消す</button>` : ""}</div>`).join("")}</div>`;
 }
 
+/* ---------- 空き表（縦に車・横に今日から4週間。スマホの「📅 空き表」タブと PC の「空き表」タブ） ---------- */
+const AKI_DAYS = 28;
+const akiUi = { type: TYPES.includes(lsGet("sharyo_aki_type")) ? lsGet("sharyo_aki_type") : "all" }; // 種類の絞り込み
+const AKI_KIND = { use: "予約・使用中", fix: "修理中", insp: "車検中" };
+// 表に出す車：廃車・隠している車・専用車両・サンプルの車は出さない。種類ごと（トラック／バン／普通車）に並べる
+const akiCars = () => shown().filter(v => !v.owner && !v.sample)
+  .map((v, i) => [v, i]).sort((a, b) => (TYPES.indexOf(a[0].type) - TYPES.indexOf(b[0].type)) || (a[1] - b[1])).map(x => x[0]);
+// 車ごとの帯：予約・使用中（返却遅れは今日まで伸ばす）／修理中／車検中
+function akiBlocks(cars) {
+  const t = ymd(today()), map = new Map(cars.map(v => [v.id, []]));
+  S.reservations.forEach(r => {
+    const l = map.get(r.vehicleId); if (!l || r.returnedAt) return;
+    const late = isOverdue(r);
+    l.push({ k: "use", from: r.from, to: late ? t : r.to, late, r });
+  });
+  cars.forEach(v => {
+    const l = map.get(v.id), ib = inspBlock(v);
+    if (ib) l.push({ k: "insp", ...ib, v });
+    repairsOf(v).forEach(r => l.push({ k: "fix", ...repairBlock(r), rep: r }));
+  });
+  return map;
+}
+let akiList = []; // いま表に出ている帯（押したときに中身を出すため）
+// 小さいナンバープレート（車種は押したときに出す）
+const akiPlate = v => `<span class="aplate"><span class="t">${esc(v.plateArea)} ${esc(v.plateClass)}</span><span class="b"><span class="h">${esc(v.plateKana)}</span><span class="n">${esc(v.plateNum)}</span></span></span>`;
+function akiHtml(pc) {
+  if (!S.ready) return `<div class="loading">読み込み中…</div>`;
+  const all = akiCars();
+  if (!all.length) return `<div class="empty">表に出せる車がありません</div>`;
+  const N = AKI_DAYS, td = today(), di = s => Math.round((parse(s) - td) / 86400000);
+  const cars = all.filter(v => akiUi.type === "all" || v.type === akiUi.type);
+  const blocks = akiBlocks(cars);
+  const days = Array.from({ length: N }, (_, i) => addDays(td, i));
+  // 空き台数：どの帯にも当たらない車だけ数える
+  const busy = new Array(N).fill(0);
+  cars.forEach(v => {
+    const hit = new Uint8Array(N);
+    blocks.get(v.id).forEach(b => { for (let i = Math.max(0, di(b.from)), e = Math.min(N - 1, di(b.to)); i <= e; i++) hit[i] = 1; });
+    hit.forEach((x, i) => { busy[i] += x; });
+  });
+  const low = Math.max(1, Math.round(cars.length * 0.15));
+  const n = k => all.filter(v => k === "all" || v.type === k).length;
+  let h = `<div class="a-corner">車</div>` + days.map((d, i) => {
+    const w = d.getDay();
+    return `<div class="a-hd${w === 6 ? " sat" : w === 0 ? " sun" : ""}${i === 0 ? " today" : ""}"><b>${d.getDate() === 1 && i ? `${d.getMonth() + 1}/1` : d.getDate()}</b>${i === 0 ? "今日" : DOW[w]}</div>`;
+  }).join("");
+  h += `<div class="a-cnth">空き台数</div>` + days.map((d, i) => `<div class="a-cnt${cars.length - busy[i] <= low ? " low" : ""}${i === 0 ? " today" : ""}">${cars.length - busy[i]}</div>`).join("");
+  // 日の枠：50台×28日でもスマホで重くならないよう、1台＝1つの行にして、土日・今日の色と区切り線は背景で描く
+  // （押した日は、押した位置から計算する）
+  const bg = days.map((d, i) => `${i === 0 ? "var(--a-today)" : d.getDay() % 6 === 0 ? "var(--a-wkend)" : "transparent"} calc(var(--dayw) * ${i}) calc(var(--dayw) * ${i + 1})`).join(",");
+  akiList = [];
+  let grp = "";
+  cars.forEach(v => {
+    if (akiUi.type === "all" && v.type !== grp) { grp = v.type; h += `<div class="a-gname">${esc(grp)}</div><div class="a-gtrack"></div>`; }
+    h += `<div class="a-name" data-act="akiCar" data-id="${v.id}" role="button" tabindex="0" title="${esc(v.kind)}">${pc ? `<span class="a-thumb">${thumbHtml(v)}</span>` : ""}${akiPlate(v)}</div><div class="a-track" data-act="akiCell" data-id="${v.id}" aria-label="${esc(v.plateKana)}${esc(v.plateNum)}：空いている日を押すと予約できます">`;
+    blocks.get(v.id).forEach(b => {
+      const s = di(b.from), e = di(b.to); if (e < 0 || s >= N) return;
+      const ix = akiList.push(b) - 1;
+      const main = b.k === "use" ? b.r.who : b.k === "fix" ? "修理" : "車検";
+      const sub = pc ? (b.k === "use" ? b.r.site : b.k === "fix" && b.rep.shop ? `${b.rep.shop.shop || SHOP_NAME}預かり` : "") : "";
+      h += `<button class="a-blk ${b.k}${b.late ? " late" : ""}${s < 0 ? " cont-l" : ""}${e >= N ? " cont-r" : ""}" style="grid-column:${Math.max(s, 0) + 1} / ${Math.min(e, N - 1) + 2}" data-act="akiBlk" data-val="${ix}"><span>${b.late ? `<i class="lt">遅れ</i>` : ""}${esc(main)}</span>${sub ? `<small>${esc(sub)}</small>` : ""}</button>`;
+    });
+    h += `</div>`;
+  });
+  return `<div class="aki${pc ? " pc" : ""}">
+    <div class="chips four aki-types">${[["all", "全部"], ...TYPES.map(t => [t, t])].map(([k, l]) =>
+      `<button class="chip ${akiUi.type === k ? "on" : ""}" data-act="akiType" data-val="${k}">${l}<span class="n">${n(k)}台</span></button>`).join("")}</div>
+    <div class="a-legend"><span><i class="use"></i>予約・使用中</span><span><i class="fix"></i>修理中</span><span><i class="insp"></i>車検中</span><span><i class="late"></i>赤いふち＝返却遅れ</span><span><i class="free"></i>空き</span></div>
+    ${pc ? "" : `<p class="a-rot">📱 スマホを横向きにすると、もっと多くの日が見られます</p>`}
+    <div class="a-board"><div class="aki-scroll"><div class="a-grid" style="--days:${N};--daybg:linear-gradient(90deg,${bg})">${h}</div></div></div>
+    ${pc ? `<p class="a-hint">白いところを押すと、その車・その日で予約できます。色の帯を押すと、だれが使うか見られます。</p>` : ""}
+  </div>`;
+}
+
+// 空き表で押したときに下から出る小さな画面
+let sheetPushed = false; // スマホ：端末の「戻る」で閉じられるよう、履歴を1つ積んだか
+const sheetOpen = () => !!$("aveil") && !$("aveil").hidden;
+function openSheet(html) {
+  let el = $("aveil");
+  if (!el) {
+    el = document.createElement("div"); el.id = "aveil"; el.className = "aveil";
+    el.innerHTML = `<div class="asheet" role="dialog" aria-modal="true"></div>`;
+    el.addEventListener("click", e => { if (e.target === el) closeSheet(); });
+    document.body.appendChild(el);
+  }
+  el.firstElementChild.innerHTML = html + `<button type="button" class="abtn ghost" data-act="akiClose">閉じる</button>`;
+  el.hidden = false; loadImages(el);
+  if (ui.view === "phone" && useNavHistory() && !hasNavEntry()) { history.pushState({ sharyo: 1 }, ""); sheetPushed = true; }
+  const b = el.querySelector(".abtn"); if (b) b.focus({ preventScroll: true });
+}
+// 閉じるだけ（積んだ履歴は、そのまま次の画面で使う）
+function hideSheet() { const el = $("aveil"); if (el) el.hidden = true; sheetPushed = false; }
+// 「閉じる」・外を押した：積んだ履歴も外す
+function closeSheet(fromPop) {
+  const pushed = sheetPushed; hideSheet();
+  if (!fromPop && pushed && hasNavEntry() && ui.screen.name === "list") { ignorePop = "sheet"; history.back(); }
+}
+const akiCarHead = v => `<div class="a-who">${thumbHtml(v)}${akiPlate(v)}<span class="m">${esc(v.kind)}</span></div>`;
+function akiShowBlock(b) {
+  if (!b) return;
+  const t = ymd(today());
+  if (b.k === "use") {
+    const r = b.r, v = byId(r.vehicleId); if (!v) return;
+    openSheet(`<h3>${b.late ? "返却遅れ" : AKI_KIND.use}</h3>${akiCarHead(v)}<p><b>${dayLabel(r.from)} 〜 ${dayLabel(r.to)}</b></p>
+      ${b.late ? `<p class="a-late">返却予定日を過ぎていますが、まだ返されていません</p>` : ""}<p>${esc(r.who)}さん → ${esc(r.site)}</p>`);
+  } else if (b.k === "fix") {
+    const r = b.rep, v = byId(r.vehicleId); if (!v) return;
+    const until = r.shop && r.shop.until;
+    openSheet(`<h3>${AKI_KIND.fix}</h3>${akiCarHead(v)}<p><b>${dayLabel(b.from)} 〜 ${until ? `${dayLabel(until)}（戻り予定）` : "（戻り予定は未定）"}</b></p>
+      ${until && until < t ? `<p class="a-late">戻り予定日を過ぎています</p>` : ""}
+      <p>${r.shop ? `${esc(r.shop.shop || SHOP_NAME)} 預かり` : "修理中"}${repairText(r) ? `：${esc(repairText(r))}` : ""}</p>`);
+  } else {
+    const v = b.v, x = v.inspection || {};
+    openSheet(`<h3>${AKI_KIND.insp}</h3>${akiCarHead(v)}<p><b>${dayLabel(b.from)} 〜 ${x.until ? `${dayLabel(x.until)}（戻り予定）` : "（戻り予定は未定）"}</b></p>
+      ${x.until && x.until < t ? `<p class="a-late">戻り予定日を過ぎています</p>` : ""}<p>車検に出しています</p>`);
+  }
+}
+function akiShowCell(vid, i) {
+  const v = byId(vid); if (!v) return;
+  const d = ymd(addDays(today(), Number(i)));
+  openSheet(`<h3>この日は空いています</h3>${akiCarHead(v)}<p><b>${dayLabel(d)}</b></p>
+    <button type="button" class="abtn go" data-act="akiReserve" data-id="${v.id}" data-val="${d}">この車を予約する</button>`);
+}
+function akiShowCar(vid) {
+  const v = byId(vid); if (!v) return;
+  openSheet(`<h3>${esc(v.kind)}</h3>${akiCarHead(v)}${vehicleTags(v)}
+    ${ui.view === "phone" ? `<button type="button" class="abtn go steel" data-act="akiDetail" data-id="${v.id}">この車の詳しい画面を見る</button>` : ""}`);
+}
+
 /* ---------- 予約 ---------- */
 const SITE_OTHER = "__other";
 const plateText = v => `${esc(v.plateArea)} ${esc(v.plateClass)} ${esc(v.plateKana)} ${esc(v.plateNum)}`;
@@ -453,12 +614,21 @@ const clashMsg = r => (effTo(r) !== r.to
   ? `この車は返却予定（${fmt(r.to)}）を過ぎて、まだ返却されていません（${r.who}さん）。返却されるまで予約できません`
   : `その日は予約が入っています：${fmt(r.from)}〜${fmt(r.to)} ${r.who}さん（${r.site}）`);
 class ClashError extends Error {}
-// 車検中で予約できない日：出した日〜戻り予定日（戻り予定を過ぎても戻していなければ今日まで）。戻り予定日がなければ今日だけ
+// 車検中の期間：出した日〜戻り予定日（戻り予定日がない・過ぎても戻していなければ今日まで）
 function inspBlock(v) {
   const x = v && v.inspection; if (!x) return null;
   const t = ymd(today());
-  return x.until ? { from: x.from, to: x.until > t ? x.until : t } : { from: t, to: t };
+  return { from: x.from || t, to: x.until && x.until > t ? x.until : t };
 }
+// 修理中の期間：預けた日（なければ修理中にした日）〜戻り予定日（トラストワン預かり）。戻り予定がない・過ぎたときは今日まで
+const tsYmd = x => (x && x.toDate ? ymd(x.toDate()) : null);
+function repairBlock(r) {
+  const t = ymd(today()), from = (r.shop && r.shop.from) || tsYmd(r.inRepairAt) || t;
+  const to = r.shop && r.shop.until && r.shop.until > t ? r.shop.until : t;
+  return { from, to: to < from ? from : to };
+}
+const repairsOf = v => S.repairs.filter(r => r.vehicleId === v.id && r.status === "in_repair");
+const repairClash = (v, from, to) => repairsOf(v).map(repairBlock).some(b => from <= b.to && b.from <= to);
 const inspClash = (v, from, to) => { const b = inspBlock(v); return !!b && from <= b.to && b.from <= to; };
 const inspMsg = v => `この車は車検中です${v.inspection.until ? `（戻り予定 ${fmt(v.inspection.until)}）` : ""}。その日は予約できません`;
 const rangeText = r => (r.from === r.to ? fmt(r.from) : `${fmt(r.from)}〜${fmt(r.to)}`);
@@ -474,7 +644,21 @@ function cancelReservation(id) {
     .catch(e => { console.error(e); toast("取り消せませんでした。もう一度お試しください", "err"); });
   toast("予約を取り消しました");
 }
-// 選んだ日を、続いている日ごとの予約（from〜to）にまとめる
+// この車で予約できない日（日付 → 理由）：ほかの予約・使用中（返却待ちは返却されるまでずっと）・車検中・修理中。今日より前は見ない
+function blockedDays(v) {
+  const map = new Map(), t = ymd(today()), limit = ymd(addDays(today(), 400));
+  const put = (from, to, why) => {
+    for (let d = parse(from < t ? t : from); ymd(d) <= to && ymd(d) <= limit; d.setDate(d.getDate() + 1)) if (!map.has(ymd(d))) map.set(ymd(d), why);
+  };
+  S.reservations.filter(r => r.vehicleId === v.id && !r.returnedAt).forEach(r => put(r.from, isOverdue(r) ? limit : r.to, "予約"));
+  const ib = inspBlock(v); if (ib) put(ib.from, ib.to, "車検");
+  repairsOf(v).forEach(r => { const b = repairBlock(r); put(b.from, b.to, "修理"); });
+  return map;
+}
+const BLOCK_IS = { 予約: "ほかの予約が入っています", 車検: "車検中です", 修理: "修理中です" };
+const BLOCK_UPTO = { 予約: "にほかの予約があるので", 車検: "は車検中なので", 修理: "は修理中なので" };
+const spanDays = (a, b) => Math.round((parse(b) - parse(a)) / 86400000) + 1;
+// 選んだ日を、続いている日ごとの予約（from〜to）にまとめる（飛び飛びの予約は、前の予約画面と同じく続いている日ごとに1件ずつ保存する）
 function toRanges(days) {
   const out = [];
   [...days].sort().forEach(d => {
@@ -483,58 +667,107 @@ function toRanges(days) {
   });
   return out;
 }
-// この車で、もう予約・使用中の日（返却待ちは返却されるまでずっと）
-function takenDays(vid) {
-  const set = new Set(), limit = ymd(addDays(today(), 400));
-  const b = inspBlock(byId(vid));
-  if (b) for (let d = parse(b.from); ymd(d) <= b.to && ymd(d) <= limit; d.setDate(d.getDate() + 1)) set.add(ymd(d));
-  S.reservations.filter(r => r.vehicleId === vid && !r.returnedAt).forEach(r => {
-    const end = isOverdue(r) ? limit : r.to;
-    for (let d = parse(r.from); ymd(d) <= end && ymd(d) <= limit; d.setDate(d.getDate() + 1)) set.add(ymd(d));
-  });
-  return set;
-}
-// 予約画面のカレンダー（押して選ぶ、もう一度押すと外れる。過去の日と、予約・使用中の日は押せない）
-function pickCalendar(v) {
-  const td = today(), t = ymd(td);
-  const [y, m] = form.month;
-  const first = new Date(y, m, 1), last = new Date(y, m + 1, 0);
-  const taken = takenDays(v.id), sel = new Set(form.days);
-  const atFirst = y === td.getFullYear() && m === td.getMonth();
-  let cells = [..."日月火水木金土"].map(d => `<div class="pd dow">${d}</div>`).join("");
-  for (let i = 0; i < first.getDay(); i++) cells += `<div class="pd blank"></div>`;
-  for (let d = 1; d <= last.getDate(); d++) {
-    const k = ymd(new Date(y, m, d)), past = k < t, busy = taken.has(k), on = sel.has(k);
-    cells += `<button type="button" class="pd${on ? " on" : ""}${busy ? " taken" : ""}${past ? " past" : ""}${k === t ? " today" : ""}" data-act="pickDay" data-val="${k}"${past || busy ? " disabled" : ""} aria-pressed="${on}" aria-label="${m + 1}月${d}日${busy ? "（予約あり）" : ""}">${d}</button>`;
+const multi = () => form.mode === "multi"; // 予約カレンダーの選び方：続けて（借りる日→返す日）／飛び飛び（1日ずつ）
+// 予約画面のカレンダー（今月と来月を縦に並べる）
+function rangeMonth(y, m, blocked) {
+  const t = ymd(today()), first = new Date(y, m, 1), n = new Date(y, m + 1, 0).getDate(), e = form.e || form.s;
+  const picked = new Set(multi() ? form.days || [] : []);
+  let h = `<div class="rc-cal"><h3>${y}年${m + 1}月</h3><div class="rc-wk">${[...DOW].map((w, i) => `<div class="${i === 0 ? "sun" : i === 6 ? "sat" : ""}">${w}</div>`).join("")}</div><div class="rc-grid">`;
+  for (let i = 0; i < first.getDay(); i++) h += `<div></div>`;
+  for (let d = 1; d <= n; d++) {
+    const dt = new Date(y, m, d), s = ymd(dt), w = dt.getDay(), why = blocked.get(s);
+    const c = ["rc-d"]; if (w === 0) c.push("sun"); if (w === 6) c.push("sat");
+    if (s < t) c.push("past"); else if (why) c.push("busy");
+    if (s === t) c.push("today");
+    if (multi()) { if (picked.has(s)) c.push("pick"); } // 飛び飛び：1日ずつ緑の丸（間はつながない）
+    else {
+      if (form.s && s >= form.s && s <= e) c.push("in");
+      if (s === form.s) c.push("start"); if (form.s && s === e) c.push("end");
+    }
+    const dis = s < t || !!why;
+    h += `<div class="${c.join(" ")}"${why && s >= t ? ` data-why="${why}"` : ""}><button type="button" data-act="rcDay" data-val="${s}"${dis ? ' aria-disabled="true"' : ""} aria-label="${dayLabel(s)}${why && s >= t ? `（${why}）` : ""}">${d}</button></div>`;
   }
-  const days = [...form.days].sort();
-  return `<div class="pcal">
-    <div class="pcal-head"><button type="button" class="pcal-nav" data-act="calMonth" data-val="-1"${atFirst ? " disabled" : ""} aria-label="前の月">‹</button>
-      <b>${y}年${m + 1}月</b><button type="button" class="pcal-nav" data-act="calMonth" data-val="1" aria-label="次の月">›</button></div>
-    <div class="pcal-grid">${cells}</div>
-    <div class="pcal-legend"><span><i class="lg-on"></i>選んだ日</span><span><i class="lg-taken"></i>予約・使用中</span></div>
-    <div class="pcal-sel">${days.length ? `選んだ日：${days.map(fmt).join("、")}（${days.length}日）` : "予約する日を押して選んでください（何日でも選べます）"}</div>
+  return h + `</div></div>`;
+}
+function rangePicker(v) {
+  const td = today(), blocked = blockedDays(v), e = form.e || form.s;
+  const box = (lb, val, empty, on) => `<div class="rc-box${on ? " on" : ""}"><span class="lb">${lb}</span><span class="v${val ? "" : " empty"}">${val ? dayLabel(val) : empty}</span></div>`;
+  const days = [...(form.days || [])].sort(), any = multi() ? days.length > 0 : !!form.s;
+  const mode = `<div class="rc-mode" role="group" aria-label="日の選び方">${[["range", "続けて"], ["multi", "飛び飛び"]].map(([k, l]) =>
+    `<button type="button" class="${(multi() ? "multi" : "range") === k ? "on" : ""}" data-act="rcMode" data-val="${k}" aria-pressed="${(multi() ? "multi" : "range") === k}">${l}</button>`).join("")}</div>`;
+  const top = multi()
+    ? `<div class="rc-pick multi"><span class="lb">使う日</span><span class="v${days.length ? "" : " empty"}">${days.length ? `${days.map(dayLabel).join("・")}<b>${days.length}日</b>` : "日を押す（何日でも選べます）"}</span></div>`
+    : `<div class="rc-pick">${box("借りる日", form.s, "日を押す", !form.s)}<span class="rc-arrow">→</span>${box("返す日", form.e, form.s ? "日を押す" : "―", !!form.s && !form.e)}</div>`;
+  const sum = multi()
+    ? (days.length ? "もう一度押すと外れます" : "使う日を1日ずつ押してください")
+    : (form.s ? `${spanDays(form.s, e)}日間${form.e ? "" : "<small>（1日だけなら、このまま予約できます）</small>"}` : "借りる日を押してください");
+  return `<div class="rc">
+    ${mode}${top}
+    <div class="rc-sum"><p class="rc-days${multi() ? " sub2" : ""}">${sum}</p>
+      <button type="button" class="rc-clr" data-act="rcClear"${any || form.rmsg ? "" : " disabled"}>やり直す</button></div>
+    ${form.rmsg ? `<p class="rc-msg">${esc(form.rmsg)}</p>` : ""}
+    ${rangeMonth(td.getFullYear(), td.getMonth(), blocked)}${rangeMonth(td.getFullYear(), td.getMonth() + 1, blocked)}
+    <div class="rc-legend"><span><i class="rc-on"></i>選んだ日</span><span><i class="rc-today"></i>今日</span><span><s>12</s>＝予約・車検・修理で使えない日</span></div>
   </div>`;
 }
+// 日を押したとき：1回目＝借りる日、2回目＝返す日（間に使えない日があれば選べない）
+function pickRange(s) {
+  const v = byId(form.vid); if (!v || form.busy) return;
+  const blocked = blockedDays(v), t = ymd(today());
+  form.rmsg = ""; form.err = "";
+  if (s < t) return;
+  if (blocked.has(s)) form.rmsg = `${dayLabel(s)} は${BLOCK_IS[blocked.get(s)]}`;
+  else if (multi()) { const d = form.days || []; form.days = d.includes(s) ? d.filter(x => x !== s) : [...d, s]; } // 飛び飛び：押すたびに付ける・外す
+  else if (!form.s || form.e || s < form.s) { form.s = s; form.e = null; }
+  else {
+    let hit = null;
+    for (let d = parse(form.s); ymd(d) <= s; d.setDate(d.getDate() + 1)) if (blocked.has(ymd(d))) { hit = ymd(d); break; }
+    if (hit) form.rmsg = `${dayLabel(hit)} ${BLOCK_UPTO[blocked.get(hit)]}、ここまでは選べません`;
+    else form.e = s;
+  }
+  render();
+}
+// 予約の画面を開く（空き表から：その車と、押した日を借りる日に入れて）。スマホは画面、PCは小さな画面で
+function openReserve(vid, day) {
+  const v = byId(vid); if (!v) return;
+  resetForm(); form.vid = v.id;
+  if (day) {
+    const why = blockedDays(v).get(day);
+    if (day < ymd(today())) { /* 過ぎた日は入れない */ } else if (why) form.rmsg = `${dayLabel(day)} は${BLOCK_IS[why]}`; else form.s = day;
+  }
+  if (ui.view === "phone") go({ name: "reserve", id: v.id, back: { name: "list", restore: true } });
+  else { ui.pcRes = v.id; render(); }
+}
+// PC：予約の画面（車両の修正と同じ形の小さな画面）。データが届いて描き直しても、見ている位置はそのまま
+function renderResModal() {
+  const v = byId(ui.pcRes);
+  if (!v || v.retired) { closeModal(); return; }
+  const ov = $("modal").querySelector(".overlay.resov"), top = ov ? ov.scrollTop : 0;
+  $("modal").innerHTML = `<div class="overlay resov"><div class="modal panel rmodal" role="dialog" aria-modal="true" aria-label="予約">
+    <h2>予約<button type="button" class="x" data-act="close" aria-label="閉じる">×</button></h2>
+    <div class="mbody">${reserveForm(v)}</div></div></div>`;
+  $("modal").hidden = false;
+  $("modal").querySelector(".overlay").scrollTop = top;
+}
+const resOpen = () => (ui.view === "phone" ? ui.screen.name === "reserve" : !!ui.pcRes);
 
 function reserveForm(v) {
-  const t = ymd(today());
   if (form.vid !== v.id) { resetForm(); form.vid = v.id; }
-  if (!form.days) form.days = [];
-  if (!form.month) { const td = today(); form.month = [td.getFullYear(), td.getMonth()]; }
+  if (!ME && !form.other) { form.other = true; form.picking = true; } // PC（名前なし）は使う人を選ぶ
   form.site = form.site || "";
   const sites = S.settings.sites || [];
   const lic = licOf(v);
+  const meBtn = ME ? `<button class="chip" style="margin-top:8px" data-act="whoMe">自分に戻す</button>` : "";
   return `<div class="sheet-title">${esc(v.kind)}</div><p class="sub">${plateText(v)}</p>
   ${lic !== "普通" ? `<div class="licwarn">⚠ この車は${lic}以上の免許が必要です<small>${esc(LICENSE_NOTE[lic])}</small></div>` : ""}
-  <div class="field"><label>使う日（押して選ぶ。飛び飛びでもOK）</label>${pickCalendar(v)}</div>
+  <div class="field">${rangePicker(v)}</div>
   <div class="field"><label>使う人</label>${!form.other
     ? `<div class="mine"><span>${esc(ME)}さん（自分）</span><button class="sw" data-act="whoOther">別の人にする</button></div>`
     : (form.who && !form.picking
-      ? `<div class="mine"><span>${esc(form.who)}さん</span><button class="sw" data-act="whoOther">変える</button></div><button class="chip" style="margin-top:8px" data-act="whoMe">自分に戻す</button>`
+      ? `<div class="mine"><span>${esc(form.who)}さん</span><button class="sw" data-act="whoOther">変える</button></div>${meBtn}`
       : `<div class="picker"><input type="search" id="whoSearch" class="nsearch" placeholder="名前で探す" value="${esc(form.whoQ || "")}" autocomplete="off" aria-label="使う人を名前で探す">
           <div id="whoList">${nameChips(form.whoQ, form.who, "pickWho")}</div>
-          <button class="chip" style="margin-top:4px" data-act="whoMe">自分に戻す</button></div>`)}</div>
+          ${meBtn}</div>`)}</div>
   <div class="field"><label for="f-site">行く現場</label><select id="f-site" name="site"><option value="">選んでください</option>${sites.map(p => `<option value="${esc(p)}"${form.site === p ? " selected" : ""}>${esc(p)}</option>`).join("")}<option value="${SITE_OTHER}"${form.site === SITE_OTHER ? " selected" : ""}>その他（入力する）</option></select>
     ${form.site === SITE_OTHER ? `<input name="siteOther" style="margin-top:8px" placeholder="現場の名前を入力" maxlength="100" value="${esc(form.siteOther || "")}" aria-label="現場の名前">` : ""}</div>
   ${form.err ? `<p class="ferr">${esc(form.err)}</p>` : ""}
@@ -547,17 +780,18 @@ async function doReserve(v) {
   const t = ymd(today());
   const who = form.other ? (form.picking ? "" : (form.who || "")) : ME;
   const site = form.site === SITE_OTHER ? String(form.siteOther || "").trim() : form.site;
-  const ranges = toRanges(form.days || []);
+  const ranges = multi() ? toRanges(form.days || []) : (form.s ? [{ from: form.s, to: form.e || form.s }] : []);
   let err = "";
-  if (!ranges.length) err = "予約する日を選んでください";
+  if (!ranges.length) err = multi() ? "使う日を選んでください" : "借りる日を選んでください";
   else if (ranges[0].from < t) err = "過ぎた日は予約できません";
   else if (!who || !site) err = "使う人と現場を選んでください";
   else if (ranges.some(g => inspClash(v, g.from, g.to))) err = inspMsg(v);
+  else if (ranges.some(g => repairClash(v, g.from, g.to))) err = "この車は修理中です。その日は予約できません";
   else { for (const g of ranges) { const c = findClash(S.reservations, v.id, g.from, g.to); if (c) { err = clashMsg(c); break; } } }
   if (err) { form.err = err; render(); return; }
 
   form.err = ""; form.busy = true; render();
-  const base = { vehicleId: v.id, who, site, createdBy: ME, returnedAt: null, returnedLot: null };
+  const base = { vehicleId: v.id, who, site, createdBy: operator(), returnedAt: null, returnedLot: null };
   try {
     // 2台のスマホで同時に予約しても重ならないよう、サーバーの最新の予約で確かめてから登録する
     await runTransaction(db, async tx => {
@@ -577,11 +811,13 @@ async function doReserve(v) {
     console.error(e);
     form.busy = false;
     form.err = e instanceof ClashError ? e.message : "予約できませんでした。電波のよい所でもう一度押してください";
-    if (ui.screen.name === "reserve") render();
+    if (resOpen()) render();
     return;
   }
   resetForm();
-  go({ name: "done", title: "予約しました", msg: `${ranges.map(rangeText).join("、")}　${who}さん　${site}` });
+  const msg = `${ranges.map(rangeText).join("、")}　${who}さん　${site}`;
+  if (ui.view === "phone") go({ name: "done", title: "予約しました", msg });
+  else { closeModal(); render(); toast(`予約しました：${msg}`); }
 }
 
 /* ---------- 自分が使用中の車（返し忘れ防止の帯） ---------- */
@@ -802,15 +1038,15 @@ function setRepairStatus(id, st) {
 
 function doneScreen(sc) {
   return `<div class="done"><div class="ok">✓</div><h2>${esc(sc.title)}</h2><p>${esc(sc.msg)}</p>
-  <button class="btn primary" data-act="tab" data-val="cars">車両一覧へ戻る</button></div>`;
+  ${ui.tab === "aki" ? `<button class="btn primary" data-act="tab" data-val="aki">空き表へ戻る</button>` : `<button class="btn primary" data-act="tab" data-val="cars">車両一覧へ戻る</button>`}</div>`;
 }
 
 /* ================= PC版ダッシュボード ================= */
 /* ---------- PC の表示の状態（絞り込み・グループの開閉・パネルの開閉。開き直しても覚えておく） ---------- */
 const pcUi = (() => {
-  const def = { filter: "all", type: "all", groups: { use: true, free: false, own: false, fix: true, insp: true }, panels: { shaken: false, repair: false, future: false } };
+  const def = { page: "dash", filter: "all", type: "all", groups: { use: true, free: false, own: false, fix: true, insp: true }, panels: { shaken: false, repair: false, future: false } };
   let p = {}; try { p = JSON.parse(lsGet("sharyo_pc_ui") || "{}") || {}; } catch (e) { p = {}; }
-  return { filter: p.filter || def.filter, type: p.type || def.type, groups: { ...def.groups, ...(p.groups || {}) }, panels: { ...def.panels, ...(p.panels || {}) } };
+  return { page: p.page === "aki" ? "aki" : def.page, filter: p.filter || def.filter, type: p.type || def.type, groups: { ...def.groups, ...(p.groups || {}) }, panels: { ...def.panels, ...(p.panels || {}) } };
 })();
 const savePcUi = () => lsSet("sharyo_pc_ui", JSON.stringify(pcUi));
 const PC_FILTERS = [["all", "全部"], ["free", "空き"], ["use", "使用中"], ["fix", "修理中"], ["insp", "車検中"], ["own", "専用"]];
@@ -824,8 +1060,15 @@ function foldList(key, items, unit) {
   };
 }
 
+// PC のいちばん上のタブ（今日の状況・空き表）
+const pcTabs = () => `<div class="pctabs" role="tablist">${[["dash", "🚐 今日の状況"], ["aki", "📅 空き表"]].map(([k, l]) =>
+  `<button type="button" role="tab" class="${pcUi.page === k ? "on" : ""}" data-act="pcPage" data-val="${k}" aria-selected="${pcUi.page === k}">${l}</button>`).join("")}</div>`;
 function renderPc() {
   const vs = shown(), d = today();
+  if (pcUi.page === "aki") {
+    $("pc").innerHTML = pcTabs() + `<div class="top"><h1>空き表</h1><span class="today">${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日（${DOW[d.getDay()]}）から4週間</span></div>${errBar()}${akiHtml(true)}`;
+    return;
+  }
   const n = k => vs.filter(v => groupOf(v) === k).length;
   const retired = S.vehicles.filter(v => v.retired);
   const hiddenV = active().filter(v => v.hidden);
@@ -861,7 +1104,7 @@ function renderPc() {
       </tbody></table>`);
   }
 
-  $("pc").innerHTML = `
+  $("pc").innerHTML = pcTabs() + `
   <div class="top"><h1>社用車 今日の状況</h1><span class="today">${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日（${DOW[d.getDay()]}）</span>
     <div class="counts"><div class="count free">${n("free")}<span>空き</span></div><div class="count use">${n("use")}<span>使用中</span></div><div class="count fix">${n("fix")}<span>修理中</span></div><div class="count insp">${n("insp")}<span>車検中</span></div></div>
     <button class="btn ghost small" data-act="settings">⚙ 設定</button></div>
@@ -1115,7 +1358,7 @@ function formPhotoHtml(url, v) {
 }
 let pendingPhoto = null; // フォームで選んだ写真（保存するときに送る）
 function closeModal() {
-  $("modal").hidden = true; $("modal").innerHTML = ""; modalId = null;
+  $("modal").hidden = true; $("modal").innerHTML = ""; modalId = null; ui.pcRes = null;
   if (pendingPhoto) URL.revokeObjectURL(pendingPhoto.preview);
   pendingPhoto = null;
 }
@@ -1689,8 +1932,18 @@ document.addEventListener("click", e => {
     case "whoMe": form.other = false; form.picking = false; form.who = ""; form.err = ""; render(); break;
     case "pickWho": form.who = val; form.picking = false; form.err = ""; render(); break;
     case "reserve": { const v = byId(id); if (v) doReserve(v); break; }
-    case "pickDay": { if (form.busy) break; const i = (form.days || []).indexOf(val); form.days = i >= 0 ? form.days.filter(d => d !== val) : [...(form.days || []), val]; form.err = ""; render(); break; }
-    case "calMonth": { const [y, m] = form.month; const d = new Date(y, m + Number(val), 1); form.month = [d.getFullYear(), d.getMonth()]; render(); break; }
+    case "rcDay": pickRange(val); break;
+    case "rcClear": if (!form.busy) { form.s = form.e = null; form.days = []; form.rmsg = ""; form.err = ""; render(); } break;
+    // 続けて／飛び飛び を切り替えたら、選んでいた日はいったん消す
+    case "rcMode": if (!form.busy && (val === "multi") !== multi()) { form.mode = val; form.s = form.e = null; form.days = []; form.rmsg = ""; form.err = ""; render(); } break;
+    case "pcPage": pcUi.page = val; savePcUi(); render(); break;
+    case "akiType": akiUi.type = val; lsSet("sharyo_aki_type", val); render(); break;
+    case "akiBlk": akiShowBlock(akiList[Number(val)]); break;
+    case "akiCell": { const r = el.getBoundingClientRect(), i = Math.floor((e.clientX - r.left) / (r.width / AKI_DAYS)); if (i >= 0 && i < AKI_DAYS) akiShowCell(id, i); break; }
+    case "akiCar": akiShowCar(id); break;
+    case "akiClose": closeSheet(); break;
+    case "akiReserve": hideSheet(); openReserve(id, val); break;
+    case "akiDetail": hideSheet(); detMonth = 0; go({ name: "detail", id }); break;
     case "cancelRes": cancelReservation(id); break;
     case "detMonth": detMonth = Math.max(0, Math.min(12, detMonth + Number(val))); render(); break;
     case "return": { const v = byId(id); if (v) doReturn(v, val, el.dataset.rid); break; }
@@ -1750,27 +2003,28 @@ document.addEventListener("submit", e => {
   if (e.target.id === "ioform") { e.preventDefault(); saveInspOut(e.target); }
   if (e.target.id === "ibform") { e.preventDefault(); saveInspBack(e.target); }
 });
-// 予約フォームの入力を覚えておく
-$("ph-screen").addEventListener("input", e => {
+// 予約フォームの入力を覚えておく（スマホの画面と、PCの予約の小さな画面）
+const inResForm = el => (ui.view === "phone" ? $("ph-screen").contains(el) : !!el.closest(".rmodal"));
+document.addEventListener("input", e => {
   if (e.target.id === "meSearch") { meQuery = e.target.value; $("meList").innerHTML = nameChips(meQuery, ME, "me"); return; }
   if (e.target.id === "whoSearch") { form.whoQ = e.target.value; $("whoList").innerHTML = nameChips(form.whoQ, form.who, "pickWho"); return; }
   const n = e.target.name;
-  if (ui.screen.name === "repair" && n === "memo") rform.memo = e.target.value;
-  if (ui.screen.name === "repair" && n === "avail") rform.avail = e.target.value;
-  if (ui.screen.name === "reserve" && ["who", "site", "siteOther"].includes(n)) form[n] = e.target.value;
+  if (ui.view === "phone" && ui.screen.name === "repair" && n === "memo") rform.memo = e.target.value;
+  if (ui.view === "phone" && ui.screen.name === "repair" && n === "avail") rform.avail = e.target.value;
+  if (resOpen() && inResForm(e.target) && ["who", "site", "siteOther"].includes(n)) form[n] = e.target.value;
 });
-$("ph-screen").addEventListener("change", e => {
-  if (ui.screen.name !== "reserve") return;
+document.addEventListener("change", e => {
+  if (!resOpen() || !inResForm(e.target)) return;
   const n = e.target.name;
   if (form.err) { form.err = ""; if (n !== "site") render(); } // 直したら古いエラーは消す
   if (n === "site") { form.site = e.target.value; render(); } // 「その他」なら入力欄を出す
 });
 document.addEventListener("keydown", e => {
-  if (e.key === "Enter" && e.target.matches && e.target.matches(".li.tap")) e.target.click();
+  if (e.key === "Enter" && e.target.matches && e.target.matches(".li.tap, .a-name")) e.target.click();
   if ((e.key === "Enter" || e.key === " ") && e.target.matches && e.target.matches("tr.grp[data-act]")) { e.preventDefault(); e.target.click(); }
 });
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape") { if (viewer) closeViewer(); else if (!$("modal").hidden) closeModal(); }
+  if (e.key === "Escape") { if (viewer) closeViewer(); else if (sheetOpen()) closeSheet(); else if (!$("modal").hidden) closeModal(); }
   if (e.key === "Enter" && e.target.matches && e.target.matches(".zoomable")) e.target.click();
 });
 document.addEventListener("toggle", e => {
@@ -1781,7 +2035,9 @@ document.addEventListener("toggle", e => {
 wide.addEventListener("change", applyView);
 // 端末の「戻る」：写真を開いていれば閉じる。一覧以外ならアプリの「‹」と同じ。一覧なら何もしない（アプリが閉じる）
 addEventListener("popstate", () => {
-  if (ignorePop) { ignorePop = false; applyListPos(); return; } // 履歴を外し終わったあとも、一覧の位置を合わせ直す
+  // 履歴を外し終わったあとも、一覧の位置を合わせ直す（空き表の小さな画面を閉じたときは、今の位置のまま）
+  if (ignorePop) { const k = ignorePop; ignorePop = false; if (k !== "sheet") applyListPos(); return; }
+  if (sheetOpen()) { closeSheet(true); return; } // 空き表で押して出た小さな画面を閉じる
   if (ui.view !== "phone" || ui.screen.name === "list") return;
   if (viewer) { closeViewer(); history.pushState({ sharyo: 1 }, ""); return; }
   go(ui.backTo || { name: "list", restore: true }, true);
@@ -1793,13 +2049,13 @@ if (isIOS && isStandalone()) {
   let sx = null, sy = 0;
   document.addEventListener("touchstart", e => {
     const t = e.touches[0];
-    sx = e.touches.length === 1 && t.clientX < 24 && ui.view === "phone" && ui.screen.name !== "list" && !viewer ? t.clientX : null;
+    sx = e.touches.length === 1 && t.clientX < 24 && ui.view === "phone" && (ui.screen.name !== "list" || sheetOpen()) && !viewer ? t.clientX : null;
     sy = t.clientY;
   }, { passive: true });
   document.addEventListener("touchend", e => {
     if (sx == null) return;
     const t = e.changedTouches[0];
-    if (t.clientX - sx > 70 && Math.abs(t.clientY - sy) < 60) goBack();
+    if (t.clientX - sx > 70 && Math.abs(t.clientY - sy) < 60) { if (sheetOpen()) closeSheet(); else goBack(); }
     sx = null;
   }, { passive: true });
 }
