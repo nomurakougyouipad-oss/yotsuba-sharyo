@@ -35,7 +35,7 @@ const db = initializeFirestore(fbApp, { localCache: persistentLocalCache({ tabMa
 const storage = getStorage(fbApp);
 
 /* ---------- 定数 ---------- */
-const APP_VERSION = "16"; // 版の番号（名前のメニューの下に出す）。sw.js の CACHE（sharyo-v○○）と同じ番号にする
+const APP_VERSION = "17"; // 版の番号（名前のメニューの下に出す）。sw.js の CACHE（sharyo-v○○）と同じ番号にする
 const TYPES = ["トラック", "バン", "普通車"];
 const SHOP_NAME = "トラストワン"; // 整備工場（子会社）の名前。専用ページは shop.html
 const LABEL = { free: "空き", use: "使用中", fix: "修理中", own: "専用", insp: "車検中" };
@@ -539,15 +539,23 @@ function akiHtml(pc) {
     });
     h += `</div>`;
   });
-  return `<div class="aki${pc ? " pc" : ""}">
+  return `<div class="aki${pc ? " is-pc" : ""}">
     <div class="chips four aki-types">${[["all", "全部"], ...TYPES.map(t => [t, t])].map(([k, l]) =>
       `<button class="chip ${akiUi.type === k ? "on" : ""}" data-act="akiType" data-val="${k}">${l}<span class="n">${n(k)}台</span></button>`).join("")}</div>
-    <div class="a-legend"><span><i class="use"></i>予約・使用中</span><span><i class="fix"></i>修理中</span><span><i class="insp"></i>車検中</span><span><i class="late"></i>赤いふち＝返却遅れ</span><span><i class="free"></i>空き</span></div>
+    <div class="a-legend"><span><i class="use"></i>予約・使用中</span><span><i class="fix"></i>修理中</span><span><i class="insp"></i>車検中</span><span><i class="late"></i>赤いふち＝返却遅れ</span><span><i class="free"></i>空き</span>${pc ? `<span class="a-hint">白いところを押すと、その車・その日で予約できます。色の帯を押すと、だれが使うか見られます。</span>` : ""}</div>
     ${pc ? "" : `<p class="a-rot">📱 スマホを横向きにすると、もっと多くの日が見られます</p>`}
     <div class="a-board"><div class="aki-scroll"><div class="a-grid" style="--days:${N};--daybg:linear-gradient(90deg,${bg})">${h}</div></div></div>
-    ${pc ? `<p class="a-hint">白いところを押すと、その車・その日で予約できます。色の帯を押すと、だれが使うか見られます。</p>` : ""}
   </div>`;
 }
+// PC：表の高さを画面の下まで使う（表の上にあるものの高さは画面の幅で変わるので、描いたあとに測る）
+// 1日の幅は、表の中の幅（縦のスクロールバーを除く）から28日分がちょうど入るように。最低46px、区切り線がずれないよう整数にする
+function fitAki() {
+  const a = $("pc").querySelector(".aki-scroll"), g = a && a.querySelector(".a-grid"); if (!g) return;
+  a.style.maxHeight = `${Math.max(320, Math.floor(innerHeight - (a.getBoundingClientRect().top + scrollY) - 12))}px`;
+  const namew = parseFloat(getComputedStyle(g).getPropertyValue("--namew")) || 196;
+  g.style.setProperty("--dayw", `${Math.max(46, Math.floor((a.clientWidth - namew - 1) / AKI_DAYS))}px`);
+}
+addEventListener("resize", () => { if (ui.view === "pc" && pcUi.page === "aki") fitAki(); });
 
 // 空き表で押したときに下から出る小さな画面
 let sheetPushed = false; // スマホ：端末の「戻る」で閉じられるよう、履歴を1つ積んだか
@@ -1065,8 +1073,11 @@ const pcTabs = () => `<div class="pctabs" role="tablist">${[["dash", "🚐 今�
   `<button type="button" role="tab" class="${pcUi.page === k ? "on" : ""}" data-act="pcPage" data-val="${k}" aria-selected="${pcUi.page === k}">${l}</button>`).join("")}</div>`;
 function renderPc() {
   const vs = shown(), d = today();
+  // 空き表のときは左右の余白をなくして、表を画面の幅いっぱいに
+  $("pc").classList.toggle("pc-aki", pcUi.page === "aki");
   if (pcUi.page === "aki") {
-    $("pc").innerHTML = pcTabs() + `<div class="top"><h1>空き表</h1><span class="today">${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日（${DOW[d.getDay()]}）から4週間</span></div>${errBar()}${akiHtml(true)}`;
+    $("pc").innerHTML = `<div class="aki-head">${pcTabs()}<div class="top"><h1>空き表</h1><span class="today">${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日（${DOW[d.getDay()]}）から4週間</span></div>${errBar()}</div>${akiHtml(true)}`;
+    fitAki();
     return;
   }
   const n = k => vs.filter(v => groupOf(v) === k).length;

@@ -547,7 +547,27 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
 #ph-screen .aki{flex:1;gap:8px}
 #ph-screen .a-board{flex:1;min-height:0}
 #ph-screen .aki-scroll{height:100%}
-.aki.pc .aki-scroll{max-height:calc(100vh - 250px);max-height:calc(100dvh - 250px);min-height:320px}
+.aki.is-pc .aki-scroll{max-height:calc(100vh - 250px);max-height:calc(100dvh - 250px);min-height:320px} /* 高さは JS（fitAki）で画面の下まで */
+/* PC の空き表：左右の余白をなくして画面の幅いっぱい。1日の幅は28日分がちょうど入るように（最低46px） */
+.pc.pc-aki{max-width:none;padding:0;margin-bottom:0}
+.pc.pc-aki .aki-head{padding:0 16px}
+.aki.is-pc{gap:8px}
+.aki.is-pc > :not(.a-board){margin-inline:16px}
+.aki.is-pc .a-board{border-radius:0;border-left:0;border-right:0}
+.aki.is-pc .a-grid{--namew:196px;--rowh:58px} /* --dayw は JS（fitAki）で、表の中の幅から計算して入れる */
+.aki.is-pc .a-hd b{font-size:16px}
+.aki.is-pc .aplate{min-width:100px;padding:2px 8px 3px}
+.aki.is-pc .aplate .t{font-size:11px}
+.aki.is-pc .aplate .h{font-size:12px}
+.aki.is-pc .aplate .n{font-size:19px}
+.aki.is-pc .a-thumb .thumb{width:48px;height:36px}
+.aki.is-pc .a-thumb .thumb svg{width:40px}
+.aki.is-pc .a-blk{height:44px;font-size:14px;container-type:inline-size}
+.aki.is-pc .a-blk small{font-size:12.5px}
+/* 帯がせまくて名前と現場の両方が入らないときは、名前だけ（両方が「渡…」「西…」と切れないように） */
+@container (max-width: 84px){ .aki.is-pc .a-blk small{display:none} }
+.aki.is-pc .a-legend{align-items:center}
+.aki.is-pc .a-hint{margin-left:auto}
 /* 種類の絞り込み：今のアプリのタブと同じ角丸の四角。台数は下に */
 .chips.aki-types{margin-bottom:0;max-width:560px}
 .aki-types .chip{flex-direction:column;flex-wrap:nowrap;row-gap:1px;min-height:52px}
