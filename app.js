@@ -35,7 +35,7 @@ const db = initializeFirestore(fbApp, { localCache: persistentLocalCache({ tabMa
 const storage = getStorage(fbApp);
 
 /* ---------- 定数 ---------- */
-const APP_VERSION = "17"; // 版の番号（名前のメニューの下に出す）。sw.js の CACHE（sharyo-v○○）と同じ番号にする
+const APP_VERSION = "18"; // 版の番号（名前のメニューの下に出す）。sw.js の CACHE（sharyo-v○○）と同じ番号にする
 const TYPES = ["トラック", "バン", "普通車"];
 const SHOP_NAME = "トラストワン"; // 整備工場（子会社）の名前。専用ページは shop.html
 const LABEL = { free: "空き", use: "使用中", fix: "修理中", own: "専用", insp: "車検中" };
@@ -539,11 +539,18 @@ function akiHtml(pc) {
     });
     h += `</div>`;
   });
+  const types = [["all", "全部"], ...TYPES.map(t => [t, t])];
+  const legend = `<div class="a-legend"><span><i class="use"></i>予約・使用中</span><span><i class="fix"></i>修理中</span><span><i class="insp"></i>車検中</span><span><i class="late"></i>赤いふち＝返却遅れ</span><span><i class="free"></i>空き</span></div>`;
+  // PC：種類のタブ（1行の細めの形）・期間・色の説明を1段にまとめる
+  const top = pc
+    ? `<div class="a-bar"><div class="a-ptabs">${types.map(([k, l]) =>
+        `<button class="${akiUi.type === k ? "on" : ""}" data-act="akiType" data-val="${k}" aria-pressed="${akiUi.type === k}">${l}<span class="n">${n(k)}台</span></button>`).join("")}</div>
+        <span class="a-span">${dayLabel(ymd(td))}から4週間</span>${legend}</div>`
+    : `<div class="chips four aki-types">${types.map(([k, l]) =>
+        `<button class="chip ${akiUi.type === k ? "on" : ""}" data-act="akiType" data-val="${k}">${l}<span class="n">${n(k)}台</span></button>`).join("")}</div>
+      ${legend}<p class="a-rot">📱 スマホを横向きにすると、もっと多くの日が見られます</p>`;
   return `<div class="aki${pc ? " is-pc" : ""}">
-    <div class="chips four aki-types">${[["all", "全部"], ...TYPES.map(t => [t, t])].map(([k, l]) =>
-      `<button class="chip ${akiUi.type === k ? "on" : ""}" data-act="akiType" data-val="${k}">${l}<span class="n">${n(k)}台</span></button>`).join("")}</div>
-    <div class="a-legend"><span><i class="use"></i>予約・使用中</span><span><i class="fix"></i>修理中</span><span><i class="insp"></i>車検中</span><span><i class="late"></i>赤いふち＝返却遅れ</span><span><i class="free"></i>空き</span>${pc ? `<span class="a-hint">白いところを押すと、その車・その日で予約できます。色の帯を押すと、だれが使うか見られます。</span>` : ""}</div>
-    ${pc ? "" : `<p class="a-rot">📱 スマホを横向きにすると、もっと多くの日が見られます</p>`}
+    ${top}
     <div class="a-board"><div class="aki-scroll"><div class="a-grid" style="--days:${N};--daybg:linear-gradient(90deg,${bg})">${h}</div></div></div>
   </div>`;
 }
@@ -1075,8 +1082,11 @@ function renderPc() {
   const vs = shown(), d = today();
   // 空き表のときは左右の余白をなくして、表を画面の幅いっぱいに
   $("pc").classList.toggle("pc-aki", pcUi.page === "aki");
+  // 空き表のときは、上の「スマホ版／PC版ダッシュボード」を、タブの行の右はしに小さく置く
+  $("switch").hidden = !wide.matches || pcUi.page === "aki";
   if (pcUi.page === "aki") {
-    $("pc").innerHTML = `<div class="aki-head">${pcTabs()}<div class="top"><h1>空き表</h1><span class="today">${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日（${DOW[d.getDay()]}）から4週間</span></div>${errBar()}</div>${akiHtml(true)}`;
+    const sw = `<div class="sw-mini" role="group" aria-label="表示の切り替え"><button data-act="view" data-val="phone">スマホ版</button><button class="on" data-act="view" data-val="pc">PC版ダッシュボード</button></div>`;
+    $("pc").innerHTML = `<div class="aki-head"><div class="a-top">${pcTabs()}${sw}</div>${errBar()}</div>${akiHtml(true)}`;
     fitAki();
     return;
   }
