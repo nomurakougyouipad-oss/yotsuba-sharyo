@@ -451,6 +451,15 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
 /* 車の詳細のカレンダー：月の切り替え */
 .cal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
 .cal-head h3{margin:0}
+/* 車の詳しい画面のカレンダー：今日から先の日は押せる（空き＝予約、オレンジ＝誰が使うか） */
+.cal button.d{border:0;padding:0;font:inherit;font-size:14px;color:var(--ink);cursor:pointer;width:100%;min-width:0}
+.cal button.d.use,.cal .d.insp,.cal .d.fix{color:#fff;font-weight:700}
+.cal .d.insp{background:var(--insp)} .cal .d.fix{background:var(--fix)}
+.cal button.d:focus-visible{outline:3px solid var(--steel-t);outline-offset:1px}
+@media (hover:hover){.cal button.d:not(.use):not(.insp):not(.fix):hover{background:color-mix(in srgb,var(--free) 22%,var(--bg))}}
+.legend i.insp{background:var(--insp)} .legend i.fix{background:var(--fix)}
+.cal-note{margin:6px 0 0;font-size:13px;color:var(--mute)}
+.latewarn{margin:0 0 10px;padding:8px 12px;border-radius:10px;background:var(--fix-bg);color:var(--fix-t);font-size:14px;font-weight:700;overflow-wrap:anywhere}
 
 /* ---- 通知 ---- */
 /* スマホ：右上の名前を押したメニュー */

@@ -35,7 +35,7 @@ const db = initializeFirestore(fbApp, { localCache: persistentLocalCache({ tabMa
 const storage = getStorage(fbApp);
 
 /* ---------- 定数 ---------- */
-const APP_VERSION = "18"; // 版の番号（名前のメニューの下に出す）。sw.js の CACHE（sharyo-v○○）と同じ番号にする
+const APP_VERSION = "19"; // 版の番号（名前のメニューの下に出す）。sw.js の CACHE（sharyo-v○○）と同じ番号にする
 const TYPES = ["トラック", "バン", "普通車"];
 const SHOP_NAME = "トラストワン"; // 整備工場（子会社）の名前。専用ページは shop.html
 const LABEL = { free: "空き", use: "使用中", fix: "修理中", own: "専用", insp: "車検中" };
@@ -439,7 +439,8 @@ function detail(v) {
       : `<p class="ownnote">この車は${esc(v.owner)}さん専用です</p>`) : "");
   return `<div class="hero">${thumbHtml(v, true, true)}${plateHtml(v)}${vehicleTags(v)}${photoBtn(v)}</div>
   <div class="rows">${rows.map(([k, val]) => `<div class="row"><span class="k">${k}</span><span class="v">${val}</span></div>`).join("")}</div>
-  <div class="actions">${actions}<button class="btn ghost" data-act="goto" data-val="repair" data-id="${v.id}">修理を頼む</button></div>
+  <div class="actions">${actions}<button class="btn ghost" data-act="goto" data-val="repair" data-id="${v.id}">修理を頼む</button>
+    ${st === "use" && canReserve(v) ? `<button class="btn ghost" data-act="goto" data-val="reserve" data-id="${v.id}">この車を予約する</button>` : ""}</div>
   ${calendar(v)}
   ${resList(v)}`;
 }
@@ -450,20 +451,42 @@ let detMonth = 0; // 今月から何か月先か
 function calendar(v) {
   const td = today(), base = new Date(td.getFullYear(), td.getMonth() + detMonth, 1), y = base.getFullYear(), m = base.getMonth();
   const first = new Date(y, m, 1), last = new Date(y, m + 1, 0);
-  const lo = ymd(first), hi = ymd(last), busy = new Set();
+  const lo = ymd(first), hi = ymd(last), resOn = new Map(); // 日 → その日の予約
   S.reservations.filter(r => r.vehicleId === v.id && !r.returnedAt && (r.to >= lo || isOverdue(r)) && r.from <= hi).forEach(r => {
     const end = isOverdue(r) ? ymd(today()) : r.to;
-    for (let d = parse(r.from > lo ? r.from : lo); ymd(d) <= end && ymd(d) <= hi; d.setDate(d.getDate() + 1)) busy.add(ymd(d));
+    for (let d = parse(r.from > lo ? r.from : lo); ymd(d) <= end && ymd(d) <= hi; d.setDate(d.getDate() + 1)) if (!resOn.has(ymd(d))) resOn.set(ymd(d), r);
   });
+  // 空いている日（今日から先）を押すと予約、予約の日（オレンジ）を押すと誰がいつまで使うか。過去の日は押せない
+  // 車検中・修理中の日は紫・赤にして、押すと予約できない理由を出す
+  const t = ymd(td), bd = blockedDays(v), can = canReserve(v), seen = new Set();
   let cells = [..."日月火水木金土"].map(d => `<div class="d dow">${d}</div>`).join("");
   for (let i = 0; i < first.getDay(); i++) cells += `<div class="d blank"></div>`;
   for (let d = 1; d <= last.getDate(); d++) {
-    const k = ymd(new Date(y, m, d));
-    cells += `<div class="d ${busy.has(k) ? "use" : ""} ${k === ymd(td) ? "today" : ""}">${d}</div>`;
+    const k = ymd(new Date(y, m, d)), r = resOn.get(k), why = bd.get(k);
+    const cls = r ? "use" : why === "車検" ? "insp" : why === "修理" ? "fix" : "";
+    if (cls) seen.add(cls);
+    const c = `d ${cls}${k === t ? " today" : ""}`;
+    cells += k < t ? `<div class="${c}">${d}</div>`
+      : r ? `<button type="button" class="${c}" data-act="detRes" data-val="${r.id}" aria-label="${dayLabel(k)} ${esc(r.who)}さんの予約">${d}</button>`
+      : can ? `<button type="button" class="${c}" data-act="detDay" data-id="${v.id}" data-val="${k}" aria-label="${dayLabel(k)}${why ? `（${why}）` : " 空き"}">${d}</button>`
+      : `<div class="${c}">${d}</div>`;
   }
   const next = nextRes(v);
-  return `<div class="cal"><div class="cal-head"><button type="button" class="pcal-nav" data-act="detMonth" data-val="-1"${detMonth <= 0 ? " disabled" : ""} aria-label="前の月">‹</button><h3>${y !== td.getFullYear() ? `${y}年` : ""}${m + 1}月の予定</h3><button type="button" class="pcal-nav" data-act="detMonth" data-val="1"${detMonth >= 12 ? " disabled" : ""} aria-label="次の月">›</button></div><div class="grid">${cells}</div>
-  <div class="legend"><i></i>予約・使用中${next ? ` ／ 次の予約：${rangeText(next)} ${esc(next.who)}さん（${esc(next.site)}）` : ""}</div></div>`;
+  const lg = [["use", "予約・使用中"], ["insp", "車検中"], ["fix", "修理中"]].filter(([k]) => k === "use" || seen.has(k)).map(([k, l]) => `<i class="${k}"></i>${l}`).join("　");
+  return `<div class="cal">${lateWarn(v)}<div class="cal-head"><button type="button" class="pcal-nav" data-act="detMonth" data-val="-1"${detMonth <= 0 ? " disabled" : ""} aria-label="前の月">‹</button><h3>${y !== td.getFullYear() ? `${y}年` : ""}${m + 1}月の予定</h3><button type="button" class="pcal-nav" data-act="detMonth" data-val="1"${detMonth >= 12 ? " disabled" : ""} aria-label="次の月">›</button></div><div class="grid">${cells}</div>
+  <div class="legend">${lg}${next ? ` ／ 次の予約：${rangeText(next)} ${esc(next.who)}さん（${esc(next.site)}）` : ""}</div>
+  ${can ? `<p class="cal-note">空いている日を押すと予約できます</p>` : ""}</div>`;
+}
+// 返却予定を過ぎて返していない予約がある車：予約画面とカレンダーの上に1行の注意
+const lateWarn = v => (S.reservations.some(r => r.vehicleId === v.id && isOverdue(r)) ? `<p class="latewarn">⚠ この車は今、返却が遅れています</p>` : "");
+// 車の詳しい画面のカレンダーで日を押したとき：空いていれば予約の画面（押した日が借りる日）、使えない日は理由を出す
+function detPickDay(vid, day) {
+  const v = byId(vid); if (!v || day < ymd(today())) return;
+  const why = blockedDays(v).get(day);
+  if (!why) { openReserve(v.id, day, { name: "detail", id: v.id }); return; }
+  const late = why === "予約" && S.reservations.some(r => r.vehicleId === v.id && isOverdue(r));
+  openSheet(`<h3>この日は予約できません</h3>${akiCarHead(v)}<p><b>${dayLabel(day)}</b></p>
+    <p>${late ? "返却予定を過ぎて、まだ返却されていません。今日は予約できません（明日からなら予約できます）" : `この日は${BLOCK_IS[why]}`}</p>`);
 }
 
 // この車のこれからの予約（使用中は除く）。取り消せるものには「取り消す」
@@ -577,7 +600,8 @@ function openSheet(html) {
   }
   el.firstElementChild.innerHTML = html + `<button type="button" class="abtn ghost" data-act="akiClose">閉じる</button>`;
   el.hidden = false; loadImages(el);
-  if (ui.view === "phone" && useNavHistory() && !hasNavEntry()) { history.pushState({ sharyo: 1 }, ""); sheetPushed = true; }
+  // スマホ：端末の「戻る」でこの小さな画面だけ閉じられるよう、履歴を1つ積む（車の詳しい画面の上で開いたときも）
+  if (ui.view === "phone" && useNavHistory() && !sheetPushed) { history.pushState({ sharyo: 1 }, ""); sheetPushed = true; }
   const b = el.querySelector(".abtn"); if (b) b.focus({ preventScroll: true });
 }
 // 閉じるだけ（積んだ履歴は、そのまま次の画面で使う）
@@ -585,7 +609,7 @@ function hideSheet() { const el = $("aveil"); if (el) el.hidden = true; sheetPus
 // 「閉じる」・外を押した：積んだ履歴も外す
 function closeSheet(fromPop) {
   const pushed = sheetPushed; hideSheet();
-  if (!fromPop && pushed && hasNavEntry() && ui.screen.name === "list") { ignorePop = "sheet"; history.back(); }
+  if (!fromPop && pushed && hasNavEntry()) { ignorePop = "sheet"; history.back(); }
 }
 const akiCarHead = v => `<div class="a-who">${thumbHtml(v)}${akiPlate(v)}<span class="m">${esc(v.kind)}</span></div>`;
 function akiShowBlock(b) {
@@ -622,11 +646,11 @@ function akiShowCar(vid) {
 /* ---------- 予約 ---------- */
 const SITE_OTHER = "__other";
 const plateText = v => `${esc(v.plateArea)} ${esc(v.plateClass)} ${esc(v.plateKana)} ${esc(v.plateNum)}`;
-// 同じ車で日付が重なる予約（返却済みは除く）
-const effTo = r => (!r.returnedAt && r.to < ymd(today()) ? "9999-12-31" : r.to);
+// 同じ車で日付が重なる予約（返却済みは除く）。返却予定を過ぎて返していない予約は今日まで（明日からは予約できる）
+const effTo = r => { const t = ymd(today()); return !r.returnedAt && r.to < t ? t : r.to; };
 const findClash = (list, vid, from, to) => list.find(r => r.vehicleId === vid && !r.returnedAt && !r.canceled && r.from <= to && from <= effTo(r)) || null;
 const clashMsg = r => (effTo(r) !== r.to
-  ? `この車は返却予定（${fmt(r.to)}）を過ぎて、まだ返却されていません（${r.who}さん）。返却されるまで予約できません`
+  ? `この車は返却予定（${fmt(r.to)}）を過ぎて、まだ返却されていません（${r.who}さん）。今日は予約できません（明日からなら予約できます）`
   : `その日は予約が入っています：${fmt(r.from)}〜${fmt(r.to)} ${r.who}さん（${r.site}）`);
 class ClashError extends Error {}
 // 車検中の期間：出した日〜戻り予定日（戻り予定日がない・過ぎても戻していなければ今日まで）
@@ -659,13 +683,13 @@ function cancelReservation(id) {
     .catch(e => { console.error(e); toast("取り消せませんでした。もう一度お試しください", "err"); });
   toast("予約を取り消しました");
 }
-// この車で予約できない日（日付 → 理由）：ほかの予約・使用中（返却待ちは返却されるまでずっと）・車検中・修理中。今日より前は見ない
+// この車で予約できない日（日付 → 理由）：ほかの予約・使用中（返却が遅れている予約は今日まで）・車検中・修理中。今日より前は見ない
 function blockedDays(v) {
   const map = new Map(), t = ymd(today()), limit = ymd(addDays(today(), 400));
   const put = (from, to, why) => {
     for (let d = parse(from < t ? t : from); ymd(d) <= to && ymd(d) <= limit; d.setDate(d.getDate() + 1)) if (!map.has(ymd(d))) map.set(ymd(d), why);
   };
-  S.reservations.filter(r => r.vehicleId === v.id && !r.returnedAt).forEach(r => put(r.from, isOverdue(r) ? limit : r.to, "予約"));
+  S.reservations.filter(r => r.vehicleId === v.id && !r.returnedAt).forEach(r => put(r.from, effTo(r), "予約"));
   const ib = inspBlock(v); if (ib) put(ib.from, ib.to, "車検");
   repairsOf(v).forEach(r => { const b = repairBlock(r); put(b.from, b.to, "修理"); });
   return map;
@@ -743,14 +767,14 @@ function pickRange(s) {
   render();
 }
 // 予約の画面を開く（空き表から：その車と、押した日を借りる日に入れて）。スマホは画面、PCは小さな画面で
-function openReserve(vid, day) {
+function openReserve(vid, day, back = { name: "list", restore: true }) {
   const v = byId(vid); if (!v) return;
   resetForm(); form.vid = v.id;
   if (day) {
     const why = blockedDays(v).get(day);
     if (day < ymd(today())) { /* 過ぎた日は入れない */ } else if (why) form.rmsg = `${dayLabel(day)} は${BLOCK_IS[why]}`; else form.s = day;
   }
-  if (ui.view === "phone") go({ name: "reserve", id: v.id, back: { name: "list", restore: true } });
+  if (ui.view === "phone") go({ name: "reserve", id: v.id, back });
   else { ui.pcRes = v.id; render(); }
 }
 // PC：予約の画面（車両の修正と同じ形の小さな画面）。データが届いて描き直しても、見ている位置はそのまま
@@ -775,7 +799,7 @@ function reserveForm(v) {
   const meBtn = ME ? `<button class="chip" style="margin-top:8px" data-act="whoMe">自分に戻す</button>` : "";
   return `<div class="sheet-title">${esc(v.kind)}</div><p class="sub">${plateText(v)}</p>
   ${lic !== "普通" ? `<div class="licwarn">⚠ この車は${lic}以上の免許が必要です<small>${esc(LICENSE_NOTE[lic])}</small></div>` : ""}
-  <div class="field">${rangePicker(v)}</div>
+  ${lateWarn(v)}<div class="field">${rangePicker(v)}</div>
   <div class="field"><label>使う人</label>${!form.other
     ? `<div class="mine"><span>${esc(ME)}さん（自分）</span><button class="sw" data-act="whoOther">別の人にする</button></div>`
     : (form.who && !form.picking
@@ -1962,6 +1986,8 @@ document.addEventListener("click", e => {
     case "akiBlk": akiShowBlock(akiList[Number(val)]); break;
     case "akiCell": { const r = el.getBoundingClientRect(), i = Math.floor((e.clientX - r.left) / (r.width / AKI_DAYS)); if (i >= 0 && i < AKI_DAYS) akiShowCell(id, i); break; }
     case "akiCar": akiShowCar(id); break;
+    case "detDay": detPickDay(id, val); break; // 車の詳しい画面のカレンダー：空いている日
+    case "detRes": { const r = S.reservations.find(x => x.id === val); if (r) akiShowBlock({ k: "use", r, late: isOverdue(r) }); break; }
     case "akiClose": closeSheet(); break;
     case "akiReserve": hideSheet(); openReserve(id, val); break;
     case "akiDetail": hideSheet(); detMonth = 0; go({ name: "detail", id }); break;
