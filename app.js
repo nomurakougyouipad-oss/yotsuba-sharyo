@@ -35,7 +35,7 @@ const db = initializeFirestore(fbApp, { localCache: persistentLocalCache({ tabMa
 const storage = getStorage(fbApp);
 
 /* ---------- 定数 ---------- */
-const APP_VERSION = "20"; // 版の番号（名前のメニューの下に出す）。sw.js の CACHE（sharyo-v○○）と同じ番号にする
+const APP_VERSION = "21"; // 版の番号（名前のメニューの下に出す）。sw.js の CACHE（sharyo-v○○）と同じ番号にする
 const TYPES = ["トラック", "バン", "普通車"];
 const SHOP_NAME = "トラストワン"; // 整備工場（子会社）の名前。専用ページは shop.html
 const LABEL = { free: "空き", use: "使用中", fix: "修理中", own: "専用", insp: "車検中" };
@@ -250,13 +250,18 @@ function applyListPos() {
 }
 // 今のスクロール位置（空き表は表の中、ほかは画面全体）
 const akiScroller = () => document.querySelector(".aki-scroll");
+// スマホの空き表は、縦は外の枠（.aki-scroll）、横は中の枠（.a-h）が動く
+const akiHz = a => (a && a.querySelector(".a-h")) || a;
 function scrollPos() {
   const a = akiScroller();
-  return a ? { aki: true, top: a.scrollTop, left: a.scrollLeft } : { top: $("ph-screen").scrollTop };
+  return a ? { aki: true, top: a.scrollTop, left: akiHz(a).scrollLeft } : { top: $("ph-screen").scrollTop };
 }
 function setScrollPos(p) {
   const a = akiScroller();
-  if (p.aki) { if (a) { a.scrollTop = p.top; a.scrollLeft = p.left; } } else $("ph-screen").scrollTop = p.top;
+  if (!p.aki) { $("ph-screen").scrollTop = p.top; return; }
+  if (!a) return;
+  a.scrollTop = p.top; akiHz(a).scrollLeft = p.left;
+  const head = a.parentElement.querySelector(".a-hhead"); if (head) head.scrollLeft = akiHz(a).scrollLeft; // 上の日付の行もそろえる
 }
 function go(s, fromPop) {
   const sc = $("ph-screen"), wasList = ui.screen.name === "list", toList = s.name === "list";
@@ -369,68 +374,18 @@ function renderPhone() {
   ui.backTo = back;
   h.innerHTML = `${back ? `<button class="back" data-act="back" aria-label="戻る">‹</button>` : ""}<h1>${title}</h1><span class="today">${d.getMonth() + 1}/${d.getDate()}（${DOW[d.getDay()]}）</span>${pill}`;
   s.innerHTML = errBar() + body;
-  if (akiOn) bindAkiScroll(s.querySelector(".aki-scroll"));
+  if (akiOn) bindAkiSync(s);
 }
-
-/* ---------- スマホの空き表：方向ロック ----------
-   ブラウザに任せると斜めにも動いてふわふわするので、1本指のときはここで動かす。
-   ・少し（8px）動いた時点で、縦と横の動いた量をくらべて向きを決め、指を離すまでその向きにだけ動かす
-   ・はじいたら、その速さから慣性で進んで止まる（1msごとに速さ×0.998。iPhone の標準に近い減り方）
-   ・動かしたあとは押したことにしない。慣性で動いている途中に触ったら止めるだけ。2本指（拡大）はブラウザのまま
-   ・表の枠は1つのままなので、左の車の列・上の日付の行が止まったままになるのは今まで通り */
-const LOCK_PX = 8, DECEL = 0.998;
-let akiFling = 0;
-const stopAkiFling = () => { if (!akiFling) return false; cancelAnimationFrame(akiFling); akiFling = 0; return true; };
-// データが届いて表が描き直されたら、新しい表の枠を動かす
-const liveAki = el => (el.isConnected ? el : document.querySelector("#ph-screen .aki-scroll"));
-function akiFlingStart(el, key, v) { // v：1msに進むpx（＋は下・右へ）
-  if (Math.abs(v) < 0.05) return;
-  let last = performance.now();
-  const step = now => {
-    const dt = Math.min(40, now - last), sc = liveAki(el); last = now;
-    if (!sc) { akiFling = 0; return; }
-    v *= Math.pow(DECEL, dt);
-    const before = sc[key]; sc[key] = before + v * dt;
-    if (Math.abs(v) < 0.02 || Math.abs(sc[key] - before) < 0.1) { akiFling = 0; return; } // 遅くなった・はしに着いたら止める
-    akiFling = requestAnimationFrame(step);
-  };
-  akiFling = requestAnimationFrame(step);
-}
-function bindAkiScroll(el) {
-  if (!el || el.dataset.lock) return;
-  el.dataset.lock = "1";
-  let sx = 0, sy = 0, x0 = 0, y0 = 0, axis = null, pts = [], suppress = false;
-  el.addEventListener("touchstart", e => {
-    suppress = stopAkiFling(); // 慣性で動いている途中に触った → 止めるだけ
-    if (e.touches.length !== 1) { axis = "multi"; return; }
-    const t = e.touches[0];
-    sx = t.clientX; sy = t.clientY; x0 = el.scrollLeft; y0 = el.scrollTop; axis = null;
-    pts = [{ t: e.timeStamp, x: sx, y: sy }];
-  }, { passive: true });
-  el.addEventListener("touchmove", e => {
-    if (axis === "multi" || e.touches.length !== 1) { axis = "multi"; return; }
-    e.preventDefault();
-    const t = e.touches[0], dx = t.clientX - sx, dy = t.clientY - sy;
-    if (!axis) {
-      if (Math.abs(dx) < LOCK_PX && Math.abs(dy) < LOCK_PX) return; // まだ向きを決めない（押しただけかもしれない）
-      axis = Math.abs(dx) > Math.abs(dy) ? "x" : "y"; suppress = true;
-    }
-    const sc = liveAki(el); if (!sc) return;
-    if (axis === "x") sc.scrollLeft = x0 - dx; else sc.scrollTop = y0 - dy;
-    pts.push({ t: e.timeStamp, x: t.clientX, y: t.clientY });
-    while (pts.length > 2 && e.timeStamp - pts[0].t > 100) pts.shift(); // 最後の0.1秒の動きで速さを出す
-  }, { passive: false });
-  const end = e => {
-    if (axis !== "x" && axis !== "y") return;
-    const a = pts[0], b = pts[pts.length - 1];
-    if (!a || b.t - a.t < 10 || e.timeStamp - b.t > 80) return; // 指を止めてから離したときは、はじかない
-    const v = axis === "x" ? -(b.x - a.x) / (b.t - a.t) : -(b.y - a.y) / (b.t - a.t);
-    akiFlingStart(el, axis === "x" ? "scrollLeft" : "scrollTop", v);
-  };
-  el.addEventListener("touchend", end);
-  el.addEventListener("touchcancel", () => { axis = null; });
-  // 動かしたあと・止めたあとの「押した」は、予約や帯の中身を開かない
-  el.addEventListener("click", e => { if (suppress) { suppress = false; e.stopPropagation(); e.preventDefault(); } }, true);
+// スマホの空き表：横に動く中の枠を動かしたら、上の日付・空き台数の行も同じだけ横に動かす
+function bindAkiSync(s) {
+  const hz = s.querySelector(".a-h"), head = s.querySelector(".a-hhead"), v = s.querySelector(".a-v");
+  if (!hz || !head) return;
+  // 外の枠に縦のスクロールバーが見えるとき（PCでスマホ版を見たときなど）は、その幅だけ上の行を広げて右はしまでそろえる
+  const sb = v ? v.offsetWidth - v.clientWidth : 0;
+  if (sb > 0) head.firstElementChild.style.paddingRight = `${sb}px`;
+  const sync = () => { head.scrollLeft = hz.scrollLeft; };
+  hz.addEventListener("scroll", sync, { passive: true });
+  sync();
 }
 
 let meQuery = "";
@@ -602,28 +557,41 @@ function akiHtml(pc) {
   });
   const low = Math.max(1, Math.round(cars.length * 0.15));
   const n = k => all.filter(v => k === "all" || v.type === k).length;
-  let h = `<div class="a-corner">車</div>` + days.map((d, i) => {
+  const corner = `<div class="a-corner">車</div>`, cnth = `<div class="a-cnth">空き台数</div>`;
+  const hds = days.map((d, i) => {
     const w = d.getDay();
     return `<div class="a-hd${w === 6 ? " sat" : w === 0 ? " sun" : ""}${i === 0 ? " today" : ""}"><b>${d.getDate() === 1 && i ? `${d.getMonth() + 1}/1` : d.getDate()}</b>${i === 0 ? "今日" : DOW[w]}</div>`;
   }).join("");
-  h += `<div class="a-cnth">空き台数</div>` + days.map((d, i) => `<div class="a-cnt${cars.length - busy[i] <= low ? " low" : ""}${i === 0 ? " today" : ""}">${cars.length - busy[i]}</div>`).join("");
+  const cnts = days.map((d, i) => `<div class="a-cnt${cars.length - busy[i] <= low ? " low" : ""}${i === 0 ? " today" : ""}">${cars.length - busy[i]}</div>`).join("");
   // 日の枠：50台×28日でもスマホで重くならないよう、1台＝1つの行にして、土日・今日の色と区切り線は背景で描く
   // （押した日は、押した位置から計算する）
   const bg = days.map((d, i) => `${i === 0 ? "var(--a-today)" : d.getDay() % 6 === 0 ? "var(--a-wkend)" : "transparent"} calc(var(--dayw) * ${i}) calc(var(--dayw) * ${i + 1})`).join(",");
   akiList = [];
   let grp = "";
+  const names = [], tracks = []; // 左の車の列・横に動く日の行（同じ順に並べる）
   cars.forEach(v => {
-    if (akiUi.type === "all" && v.type !== grp) { grp = v.type; h += `<div class="a-gname">${esc(grp)}</div><div class="a-gtrack"></div>`; }
-    h += `<div class="a-name" data-act="akiCar" data-id="${v.id}" role="button" tabindex="0" title="${esc(v.kind)}">${pc ? `<span class="a-thumb">${thumbHtml(v)}</span>` : ""}${akiPlate(v)}</div><div class="a-track" data-act="akiCell" data-id="${v.id}" aria-label="${esc(v.plateKana)}${esc(v.plateNum)}：空いている日を押すと予約できます">`;
+    if (akiUi.type === "all" && v.type !== grp) { grp = v.type; names.push(`<div class="a-gname">${esc(grp)}</div>`); tracks.push(`<div class="a-gtrack"></div>`); }
+    names.push(`<div class="a-name" data-act="akiCar" data-id="${v.id}" role="button" tabindex="0" title="${esc(v.kind)}">${pc ? `<span class="a-thumb">${thumbHtml(v)}</span>` : ""}${akiPlate(v)}</div>`);
+    let t = `<div class="a-track" data-act="akiCell" data-id="${v.id}" aria-label="${esc(v.plateKana)}${esc(v.plateNum)}：空いている日を押すと予約できます">`;
     blocks.get(v.id).forEach(b => {
       const s = di(b.from), e = di(b.to); if (e < 0 || s >= N) return;
       const ix = akiList.push(b) - 1;
       const main = b.k === "use" ? b.r.who : b.k === "fix" ? "修理" : "車検";
       const sub = pc ? (b.k === "use" ? b.r.site : b.k === "fix" && b.rep.shop ? `${b.rep.shop.shop || SHOP_NAME}預かり` : "") : "";
-      h += `<button class="a-blk ${b.k}${b.late ? " late" : ""}${s < 0 ? " cont-l" : ""}${e >= N ? " cont-r" : ""}" style="grid-column:${Math.max(s, 0) + 1} / ${Math.min(e, N - 1) + 2}" data-act="akiBlk" data-val="${ix}"><span>${b.late ? `<i class="lt">遅れ</i>` : ""}${esc(main)}</span>${sub ? `<small>${esc(sub)}</small>` : ""}</button>`;
+      t += `<button class="a-blk ${b.k}${b.late ? " late" : ""}${s < 0 ? " cont-l" : ""}${e >= N ? " cont-r" : ""}" style="grid-column:${Math.max(s, 0) + 1} / ${Math.min(e, N - 1) + 2}" data-act="akiBlk" data-val="${ix}"><span>${b.late ? `<i class="lt">遅れ</i>` : ""}${esc(main)}</span>${sub ? `<small>${esc(sub)}</small>` : ""}</button>`;
     });
-    h += `</div>`;
+    tracks.push(t + `</div>`);
   });
+  const gridVars = `--days:${N};--daybg:linear-gradient(90deg,${bg})`;
+  // PC：今まで通り1つの枠（縦横とも同じ枠が動き、左の列・上の行は sticky で止める）
+  // スマホ：縦に動く外の枠（左の車の列＋横に動く中の枠）と、上の日付・空き台数の行（中の枠と一緒に横に動かす）に分ける
+  //        縦の指は外の枠、横の指は中の枠が受け持つので、ブラウザ本来のスクロールのまま斜めにふらつきにくい
+  const board = pc
+    ? `<div class="a-board"><div class="aki-scroll"><div class="a-grid" style="${gridVars}">${corner}${hds}${cnth}${cnts}${names.map((x, i) => x + tracks[i]).join("")}</div></div></div>`
+    : `<div class="a-board a-split" style="${gridVars}">
+        <div class="a-headrow"><div class="a-headl">${corner}${cnth}</div><div class="a-hhead"><div class="a-hgrid">${hds}${cnts}</div></div></div>
+        <div class="aki-scroll a-v"><div class="a-vin"><div class="a-names">${names.join("")}</div><div class="a-h"><div class="a-rows">${tracks.join("")}</div></div></div></div>
+      </div>`;
   const types = [["all", "全部"], ...TYPES.map(t => [t, t])];
   const legend = `<div class="a-legend"><span><i class="use"></i>予約・使用中</span><span><i class="fix"></i>修理中</span><span><i class="insp"></i>車検中</span><span><i class="late"></i>赤いふち＝返却遅れ</span><span><i class="free"></i>空き</span></div>`;
   // PC：種類のタブ（1行の細めの形）・期間・色の説明を1段にまとめる
@@ -636,7 +604,7 @@ function akiHtml(pc) {
       ${legend}<p class="a-rot">📱 スマホを横向きにすると、もっと多くの日が見られます</p>`;
   return `<div class="aki${pc ? " is-pc" : ""}">
     ${top}
-    <div class="a-board"><div class="aki-scroll"><div class="a-grid" style="--days:${N};--daybg:linear-gradient(90deg,${bg})">${h}</div></div></div>
+    ${board}
   </div>`;
 }
 // PC：表の高さを画面の下まで使う（表の上にあるものの高さは画面の幅で変わるので、描いたあとに測る）

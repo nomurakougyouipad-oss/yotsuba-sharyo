@@ -555,7 +555,7 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
 #ph-screen.aki-mode{display:flex;flex-direction:column;overflow:hidden;padding-top:10px}
 #ph-screen .aki{flex:1;gap:8px}
 #ph-screen .a-board{flex:1;min-height:0}
-#ph-screen .aki-scroll{height:100%}
+#ph-screen .aki-scroll{height:100%} /* （2つの枠にしたスマホは下の .a-split で上書き） */
 .aki.is-pc .aki-scroll{max-height:calc(100vh - 250px);max-height:calc(100dvh - 250px);min-height:320px} /* 高さは JS（fitAki）で画面の下まで */
 /* PC の空き表：左右の余白をなくして画面の幅いっぱい。1日の幅は28日分がちょうど入るように（最低46px） */
 .pc.pc-aki{max-width:none;padding:0;margin-bottom:0}
@@ -606,7 +606,7 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
 .a-board{background:var(--paper);border:1.5px solid var(--line);border-radius:12px;overflow:hidden}
 .aki-scroll{overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
 .a-grid{--namew:172px;--dayw:46px;--rowh:50px;display:grid;grid-template-columns:var(--namew) repeat(var(--days),var(--dayw));min-width:max-content;font-size:15px;line-height:1.2}
-#ph-screen .a-grid{--namew:132px;--dayw:42px}
+#ph-screen .a-grid,#ph-screen .a-split{--namew:132px;--dayw:42px}
 /* 止まったままにする部分：上の日付・空き台数の行、左の車の列・まとまりの見出し */
 .a-corner,.a-hd,.a-cnth,.a-cnt{position:sticky;background:var(--paper);z-index:6}
 .a-corner,.a-hd{top:0} .a-cnth,.a-cnt{top:44px}
@@ -657,7 +657,7 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
   #ph-screen .aki{gap:6px}
   #ph-screen .a-legend{display:none}
   #ph-screen .aki-types .chip{min-height:36px;flex-direction:row;column-gap:6px;font-size:14px}
-  #ph-screen .a-grid{--rowh:40px}
+  #ph-screen .a-grid,#ph-screen .a-split{--rowh:40px}
   #ph-screen .a-blk{height:30px}
 }
 
@@ -727,6 +727,24 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
 .rc-pick.multi .v.empty{color:var(--busy-fg);font-weight:500}
 .rc-days.sub2{color:var(--mute);font-weight:500;font-size:14px}
 .rc-d.pick button{background:var(--free);color:#fff}
+/* ---- スマホの空き表：縦に動く外の枠と、横に動く中の枠に分ける（ブラウザ本来のスクロールのまま、斜めにふらつきにくく） ----
+   外の枠（.a-v）＝縦だけ。中に左の車の列（.a-names）と横に動く中の枠（.a-h）
+   上の日付・空き台数の行（.a-hhead）は外の枠の外に置いて縦には動かさず、横は中の枠に合わせて JS でそろえる */
+.a-split{--rowh:50px;display:flex;flex-direction:column}
+.a-split .a-corner,.a-split .a-cnth,.a-split .a-hd,.a-split .a-cnt,.a-split .a-name,.a-split .a-gname{position:static}
+.a-headrow{flex:none;display:flex;background:var(--paper)}
+.a-headl{flex:none;width:var(--namew);display:flex;flex-direction:column}
+.a-hhead{flex:1;min-width:0;overflow:hidden}
+.a-hgrid{display:grid;grid-template-columns:repeat(var(--days),var(--dayw));width:max-content}
+#ph-screen .a-split .aki-scroll{height:auto;flex:1;min-height:0}
+.a-split .a-v{overflow-x:hidden;overflow-y:auto}
+.a-vin{display:flex;align-items:flex-start}
+.a-names{flex:none;width:var(--namew)}
+.a-h{flex:1;min-width:0;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch}
+.a-rows{width:calc(var(--dayw) * var(--days))}
+.a-split .a-gname,.a-split .a-gtrack{height:25px}
+.a-split .a-gname{display:flex;align-items:center}
+.a-split .a-blk span{left:6px} /* 帯の名前は、中の枠の左はしに残す */
 /* 下のタブは、スクロールしたカレンダーの日（z-index:1）より上に出す */
 .tabs{z-index:10}
 /* PC：予約の小さな画面 */
