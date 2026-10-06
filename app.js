@@ -35,7 +35,7 @@ const db = initializeFirestore(fbApp, { localCache: persistentLocalCache({ tabMa
 const storage = getStorage(fbApp);
 
 /* ---------- 定数 ---------- */
-const APP_VERSION = "19"; // 版の番号（名前のメニューの下に出す）。sw.js の CACHE（sharyo-v○○）と同じ番号にする
+const APP_VERSION = "20"; // 版の番号（名前のメニューの下に出す）。sw.js の CACHE（sharyo-v○○）と同じ番号にする
 const TYPES = ["トラック", "バン", "普通車"];
 const SHOP_NAME = "トラストワン"; // 整備工場（子会社）の名前。専用ページは shop.html
 const LABEL = { free: "空き", use: "使用中", fix: "修理中", own: "専用", insp: "車検中" };
@@ -369,6 +369,68 @@ function renderPhone() {
   ui.backTo = back;
   h.innerHTML = `${back ? `<button class="back" data-act="back" aria-label="戻る">‹</button>` : ""}<h1>${title}</h1><span class="today">${d.getMonth() + 1}/${d.getDate()}（${DOW[d.getDay()]}）</span>${pill}`;
   s.innerHTML = errBar() + body;
+  if (akiOn) bindAkiScroll(s.querySelector(".aki-scroll"));
+}
+
+/* ---------- スマホの空き表：方向ロック ----------
+   ブラウザに任せると斜めにも動いてふわふわするので、1本指のときはここで動かす。
+   ・少し（8px）動いた時点で、縦と横の動いた量をくらべて向きを決め、指を離すまでその向きにだけ動かす
+   ・はじいたら、その速さから慣性で進んで止まる（1msごとに速さ×0.998。iPhone の標準に近い減り方）
+   ・動かしたあとは押したことにしない。慣性で動いている途中に触ったら止めるだけ。2本指（拡大）はブラウザのまま
+   ・表の枠は1つのままなので、左の車の列・上の日付の行が止まったままになるのは今まで通り */
+const LOCK_PX = 8, DECEL = 0.998;
+let akiFling = 0;
+const stopAkiFling = () => { if (!akiFling) return false; cancelAnimationFrame(akiFling); akiFling = 0; return true; };
+// データが届いて表が描き直されたら、新しい表の枠を動かす
+const liveAki = el => (el.isConnected ? el : document.querySelector("#ph-screen .aki-scroll"));
+function akiFlingStart(el, key, v) { // v：1msに進むpx（＋は下・右へ）
+  if (Math.abs(v) < 0.05) return;
+  let last = performance.now();
+  const step = now => {
+    const dt = Math.min(40, now - last), sc = liveAki(el); last = now;
+    if (!sc) { akiFling = 0; return; }
+    v *= Math.pow(DECEL, dt);
+    const before = sc[key]; sc[key] = before + v * dt;
+    if (Math.abs(v) < 0.02 || Math.abs(sc[key] - before) < 0.1) { akiFling = 0; return; } // 遅くなった・はしに着いたら止める
+    akiFling = requestAnimationFrame(step);
+  };
+  akiFling = requestAnimationFrame(step);
+}
+function bindAkiScroll(el) {
+  if (!el || el.dataset.lock) return;
+  el.dataset.lock = "1";
+  let sx = 0, sy = 0, x0 = 0, y0 = 0, axis = null, pts = [], suppress = false;
+  el.addEventListener("touchstart", e => {
+    suppress = stopAkiFling(); // 慣性で動いている途中に触った → 止めるだけ
+    if (e.touches.length !== 1) { axis = "multi"; return; }
+    const t = e.touches[0];
+    sx = t.clientX; sy = t.clientY; x0 = el.scrollLeft; y0 = el.scrollTop; axis = null;
+    pts = [{ t: e.timeStamp, x: sx, y: sy }];
+  }, { passive: true });
+  el.addEventListener("touchmove", e => {
+    if (axis === "multi" || e.touches.length !== 1) { axis = "multi"; return; }
+    e.preventDefault();
+    const t = e.touches[0], dx = t.clientX - sx, dy = t.clientY - sy;
+    if (!axis) {
+      if (Math.abs(dx) < LOCK_PX && Math.abs(dy) < LOCK_PX) return; // まだ向きを決めない（押しただけかもしれない）
+      axis = Math.abs(dx) > Math.abs(dy) ? "x" : "y"; suppress = true;
+    }
+    const sc = liveAki(el); if (!sc) return;
+    if (axis === "x") sc.scrollLeft = x0 - dx; else sc.scrollTop = y0 - dy;
+    pts.push({ t: e.timeStamp, x: t.clientX, y: t.clientY });
+    while (pts.length > 2 && e.timeStamp - pts[0].t > 100) pts.shift(); // 最後の0.1秒の動きで速さを出す
+  }, { passive: false });
+  const end = e => {
+    if (axis !== "x" && axis !== "y") return;
+    const a = pts[0], b = pts[pts.length - 1];
+    if (!a || b.t - a.t < 10 || e.timeStamp - b.t > 80) return; // 指を止めてから離したときは、はじかない
+    const v = axis === "x" ? -(b.x - a.x) / (b.t - a.t) : -(b.y - a.y) / (b.t - a.t);
+    akiFlingStart(el, axis === "x" ? "scrollLeft" : "scrollTop", v);
+  };
+  el.addEventListener("touchend", end);
+  el.addEventListener("touchcancel", () => { axis = null; });
+  // 動かしたあと・止めたあとの「押した」は、予約や帯の中身を開かない
+  el.addEventListener("click", e => { if (suppress) { suppress = false; e.stopPropagation(); e.preventDefault(); } }, true);
 }
 
 let meQuery = "";
