@@ -38,7 +38,7 @@ GPS・位置追跡は **やらない**（検討の結果、見送り）。
 - 認証: **Firebase 匿名認証**（消防車アプリと同じ。ユーザー登録なし）
 - PWA対応（ホーム画面に追加できる。manifest + service worker）
 - フォント: Zen Kaku Gothic New（Google Fonts）
-- Firebaseプロジェクト: **yotsuba-sharyo**（作成済み・Blazeプラン）。設定は同梱の `firebase-config.js` を使う（SDKはCDN v12.19.0、`<script type="module">`）
+- Firebaseプロジェクト: **yotsuba-sharyo**（作成済み・Blazeプラン）。設定は同梱の `firebase-config.js` を使う（SDKはCDN v12.19.0、`<script type="module">`。版を上げるときは予定アプリと同じ日に同じ版にする。9章「Firebase の版を上げるとき」）
   - 作成済み: Firestore（nam5・Standard・テストモード・毎週月曜バックアップ）/ Storage（US-EAST1・テストモード）/ 匿名認証 有効 / Webアプリ yotsuba-sharyo-web 登録済み
   - テストモードは30日で失効するので、段階1で firestore.rules / storage.rules を必ず書くこと
 - セキュリティルール（firestore.rules / storage.rules）も書くこと。テストモードのまま公開しない。
@@ -277,6 +277,13 @@ notifyLog/{通知のキー}             // 送った記録（Functions だけが
 
 - サンプルの車・予約・修理（sample: true）、廃車・一時的に隠した車（車検のみ）には送らない
 - 公開鍵（VAPID）は `firebase-config.js` の `VAPID_KEY`。空のあいだは通知の機能を出さない
+
+#### Firebase の版を上げるとき（2026-10-07 追加）
+- **予定アプリ（よつば週間予定・`yotsuba-yotei`）と同じ日に、同じ版にすること。** 片方だけ上げない
+- 理由：2つのアプリは同じ住所（`nomurakougyouipad-oss.github.io`）にあり、Android の Chrome では、通知の部品がスマホの中に作る置き場（`firebase-messaging-database`）を共有する。新しい版で置き場の版が上がると、古いままのアプリは `VersionError The requested version (1) is less than the existing version (2)` で通知を登録できなくなる（iPhone のホーム画面アプリは置き場がアプリごとに別なので起きない）
+- 2026-10-07 に実際に起きた：こちらが 12.19.0（置き場は版2。Firebase 12.14 から）、予定アプリが 9.23.0（置き場は版1）だったため、両方を使う人の Android で予定アプリの通知を登録できなかった。予定アプリを 12.19.0 に上げて直した
+- 版を書く場所：こちらは `firebase-config.js` の `FIREBASE_SDK_VERSION`。予定アプリは `yotei.html` の `<head>` の Firebase 2つと `MESSAGING_SDK`（3か所とも同じ版）
+- いまは両方とも 12.19.0
 - 走行距離・給油・ETC等の記録
 - 複数会社対応・ログイン管理
 
