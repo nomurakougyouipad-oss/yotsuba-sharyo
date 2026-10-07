@@ -23,7 +23,7 @@ const {
   initializeApp, getAuth, signInAnonymously, onAuthStateChanged,
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
   collection, doc, query, where, onSnapshot, getDocs, setDoc, updateDoc, writeBatch,
-  serverTimestamp, Timestamp, runTransaction, getDocsFromServer, increment,
+  serverTimestamp, Timestamp, runTransaction, getDocsFromServer, getDocFromServer, increment,
   deleteDoc, arrayUnion, arrayRemove,
 } = fb;
 const { getStorage, ref: storageRef, uploadBytesResumable, getDownloadURL, deleteObject } = fb.storageMod;
@@ -35,7 +35,7 @@ const db = initializeFirestore(fbApp, { localCache: persistentLocalCache({ tabMa
 const storage = getStorage(fbApp);
 
 /* ---------- 定数 ---------- */
-const APP_VERSION = "21"; // 版の番号（名前のメニューの下に出す）。sw.js の CACHE（sharyo-v○○）と同じ番号にする
+const APP_VERSION = "22"; // 版の番号（名前のメニューの下に出す）。sw.js の CACHE（sharyo-v○○）と同じ番号にする
 const TYPES = ["トラック", "バン", "普通車"];
 const SHOP_NAME = "トラストワン"; // 整備工場（子会社）の名前。専用ページは shop.html
 const LABEL = { free: "空き", use: "使用中", fix: "修理中", own: "専用", insp: "車検中" };
@@ -54,6 +54,7 @@ const S = {
   notify: {}, notifyLoaded: false, // 通知を届ける人（PCで選ぶ）：{ shaken: [名前…], due: […], overdue: […], repair: […] }
   prefs: new Map(), // 本人がスマホでオフにした通知：名前 → Set(種類)
   tokenNames: new Set(), // 通知を許可した端末がある人の名前
+  tokens: [], tokenIds: new Set(), // 端末の登録（PCの通知タブに、人ごとの端末と登録した日を出す）
   shopUsers: [], // トラストワンの人の名前（例：山岡（トラストワン））
   ready: false, error: "",
 };
@@ -942,28 +943,101 @@ function getMessagingMod() {
     .catch(e => { console.warn(e); messaging = null; return null; });
   return messaging;
 }
+// この端末の登録の、最後にやってみた結果（スマホの「🔔 通知」画面に出す）。{ ok, msg, detail, at }
+const PUSH_STATUS_KEY = "sharyo_push_status";
+const pushStatus = () => { try { return JSON.parse(lsGet(PUSH_STATUS_KEY) || "null"); } catch (e) { return null; } };
+function setPushStatus(ok, msg, detail = "") {
+  lsSet(PUSH_STATUS_KEY, JSON.stringify({ ok, msg, detail: String(detail).slice(0, 160), at: Date.now() }));
+  if (ui.view === "phone" && ui.screen.name === "notify") render();
+}
+// 待つ長さの上限（電波が弱いと返事が来ないまま止まることがあるので、打ち切って理由を出す）
+const inTime = (p, ms) => Promise.race([p, new Promise((_, ng) => setTimeout(() => ng(Object.assign(new Error("timeout"), { code: "timeout" })), ms))]);
+// どの段階で失敗したか（sw：通知の受け口、token：登録番号、save：サーバーへの保存）
+const pushStep = (step, p, ms) => inTime(p, ms).catch(e => { throw Object.assign(new Error((e && e.message) || String(e)), { step, code: (e && (e.code || e.name)) || "" }); });
+function pushErrText(e) {
+  const c = String(e.code || "") + " " + String(e.message || "");
+  if (/timeout/.test(c)) return "返事がありませんでした（電波が弱いかもしれません）";
+  if (/permission-blocked|permission-default|NotAllowedError/.test(c)) return "この端末で通知が許可されていません（端末の設定で許可してください）";
+  if (/VersionError/.test(c)) return "端末の中の保存場所の版が合いません（同じ住所の予定アプリと Firebase の版がちがう）";
+  if (/unsupported/.test(c)) return "このブラウザでは通知を使えません";
+  if (e.step === "sw") return "通知の受け口（service worker）を用意できませんでした";
+  if (e.step === "token") return "通知の登録番号を取れませんでした";
+  if (e.step === "save") return "サーバーに登録を保存できませんでした（電波が弱いかもしれません）";
+  return "通知の登録に失敗しました";
+}
 // この端末の通知トークンを取り、名前とひもづけて保存する（前のトークンは片づける）
-async function saveToken() {
-  const ms = await getMessagingMod(); if (!ms || !ME) return false;
-  await navigator.serviceWorker.register("./sw.js");
-  const reg = await navigator.serviceWorker.ready; // 動き出してからでないとトークンを取れない
-  const token = await ms.m.getToken(ms.inst, { vapidKey: VAPID_KEY, serviceWorkerRegistration: reg });
-  if (!token) return false;
-  const old = lsGet(TOKEN_KEY);
-  setDoc(doc(db, "pushTokens", token), { name: ME, platform: isIOS ? "ios" : (/Android/.test(navigator.userAgent) ? "android" : "pc"), updatedAt: serverTimestamp() })
-    .catch(e => console.warn("通知の端末を保存できません", e));
-  if (old && old !== token) deleteDoc(doc(db, "pushTokens", old)).catch(() => {});
-  lsSet(TOKEN_KEY, token);
-  return true;
+// fresh：端末の中に残っている古い登録を捨てて、新しく取り直す（通知の受け口を一度外すと、Firebase が新しい登録番号を作り直す）
+async function saveToken(fresh = false) {
+  const ms = await getMessagingMod();
+  if (!ms) { setPushStatus(false, "このブラウザでは通知を使えません"); return false; }
+  if (!ME) return false;
+  try {
+    await pushStep("sw", navigator.serviceWorker.register("./sw.js"), 20000);
+    const reg = await pushStep("sw", navigator.serviceWorker.ready, 20000); // 動き出してからでないとトークンを取れない
+    if (fresh) { try { const sub = await reg.pushManager.getSubscription(); if (sub) await sub.unsubscribe(); } catch (e) { console.warn(e); } }
+    const token = await pushStep("token", ms.m.getToken(ms.inst, { vapidKey: VAPID_KEY, serviceWorkerRegistration: reg }), 30000);
+    if (!token) throw Object.assign(new Error("空でした"), { step: "token" });
+    const old = lsGet(TOKEN_KEY);
+    await pushStep("save", setDoc(doc(db, "pushTokens", token), { name: ME, platform: isIOS ? "ios" : (/Android/.test(navigator.userAgent) ? "android" : "pc"), updatedAt: serverTimestamp() }), 20000);
+    if (old && old !== token) deleteDoc(doc(db, "pushTokens", old)).catch(() => {});
+    lsSet(TOKEN_KEY, token);
+    setPushStatus(true, fresh ? "無効になっていた登録を捨てて、新しく登録し直しました" : "この端末は通知を受け取れる状態です");
+    return true;
+  } catch (e) {
+    console.warn("通知の登録に失敗", e);
+    setPushStatus(false, pushErrText(e), [e.step, e.code, e.message].filter(Boolean).join(" / "));
+    return false;
+  }
+}
+// アプリを開いたとき：この端末の登録がサーバーで消されていたら（送ったときに無効と分かると、サーバーが消す）、古い登録を捨てて取り直す
+async function checkMyPush() {
+  const t = lsGet(TOKEN_KEY);
+  let gone = false;
+  if (t) { try { gone = !(await inTime(getDocFromServer(doc(db, "pushTokens", t)), 15000)).exists(); } catch (e) { /* 確かめられないときは、いつも通り保存し直すだけ */ } }
+  await saveToken(gone);
+}
+// 「テスト通知を送る」：押した本人のこの端末にだけ届く。無効になっていたら、取り直してもう一度送る
+// しくみ：pushTests に「この端末に送って」を1件書く → サーバー（Cloud Functions）が送って、結果（result）を同じ記録に書き戻す
+//        （会社の決まりで、だれでも呼べるサーバーの入口は作れないため、修理依頼の通知と同じ形にしている）
+let testBusy = false;
+function requestTestPush() {
+  const ref = doc(collection(db, "pushTests"));
+  return new Promise((ok, ng) => {
+    let unsub = () => {};
+    const timer = setTimeout(() => { unsub(); ng(Object.assign(new Error("timeout"), { code: "timeout" })); }, 30000);
+    setDoc(ref, { token: lsGet(TOKEN_KEY), name: ME, at: serverTimestamp() }).catch(e => { clearTimeout(timer); unsub(); ng(e); });
+    unsub = onSnapshot(ref, s => {
+      const r = s.exists() && s.get("result");
+      if (r) { clearTimeout(timer); unsub(); ok(r); }
+    }, e => { clearTimeout(timer); ng(e); });
+  });
+}
+async function sendTestPush() {
+  if (testBusy) return;
+  testBusy = true; render();
+  const call = () => requestTestPush();
+  try {
+    let r = await call(), again = false;
+    if (!r.ok && (r.code === "dead" || r.code === "not-registered")) { // サーバーで無効・未登録 → 取り直して、もう一度
+      again = true;
+      if (await saveToken(true)) r = await call();
+    }
+    if (r.ok) setPushStatus(true, `テスト通知を送りました${again ? "（登録を取り直してから）" : ""}。数秒たっても届かなければ、端末の設定で「社用車」の通知が許可されているか見てください`);
+    else if (r.code === "too-soon") setPushStatus(false, "少し前に送ったばかりです。30秒ほど待ってから押してください");
+    else if (!again || pushStatus().ok) setPushStatus(false, "テスト通知を送れませんでした", r.code || "");
+  } catch (e) {
+    console.warn(e);
+    setPushStatus(false, e.code === "timeout" ? "サーバーから返事がありませんでした（電波が弱いか、サーバーの更新待ち）" : "テスト通知を送れませんでした", e.code || e.message);
+  }
+  testBusy = false; render();
 }
 // 「🔔 通知をオンにする」：許可のダイアログを出す（iPhone では押した直後に呼ぶ必要がある）
 function enablePush() {
   const ask = Notification.permission === "granted" ? Promise.resolve("granted") : Notification.requestPermission();
   ask.then(async p => {
-    if (p !== "granted") { toast("通知は許可されませんでした"); render(); return; }
-    let ok = false;
-    try { ok = await saveToken(); } catch (e) { console.error(e); }
-    toast(ok ? "通知をオンにしました" : "通知をオンにできませんでした。電波のよい所でもう一度押してください", ok ? "" : "err");
+    if (p !== "granted") { setPushStatus(false, "通知が許可されませんでした"); toast("通知は許可されませんでした"); render(); return; }
+    const ok = await saveToken();
+    toast(ok ? "通知をオンにしました" : `通知をオンにできませんでした：${pushStatus().msg}`, ok ? "" : "err");
     render();
   });
 }
@@ -981,16 +1055,26 @@ function pushBar() {
   if (st === "ios-browser") return `<p class="pushnote">ホーム画面に追加すると通知が届きます</p>`;
   return "";
 }
+// この端末の登録の状態（OK・失敗とその理由）と「テスト通知を送る」
+function pushStatusBox(st) {
+  const ps = pushStatus();
+  const when = ps ? (() => { const d = new Date(ps.at); return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}:${pad(d.getMinutes())}`; })() : "";
+  const there = lsGet(TOKEN_KEY) && S.tokenIds.has(lsGet(TOKEN_KEY));
+  const box = ps ? `<div class="pstatus ${ps.ok ? "ok" : "ng"}"><b>${ps.ok ? "✓" : "⚠"} ${esc(ps.msg)}</b>
+      <small>${when}${ps.ok && st === "on" ? `　サーバーの登録：${there ? "あり" : "確認中"}` : ""}${ps.detail ? `<br>くわしく：${esc(ps.detail)}` : ""}</small></div>` : "";
+  const test = st === "on" ? `<button class="btn ghost ptest" data-act="pushTest"${testBusy ? " disabled" : ""}>${testBusy ? "送っています…" : "テスト通知を送る（この端末にだけ届きます）"}</button>` : "";
+  return box + test;
+}
 function notifyScreen() {
   const types = NTYPES.filter(t => adminOn(ME).includes(t[0]));
   if (!S.notifyLoaded) return `<div class="loading">読み込み中…</div>`;
-  if (!types.length) return `<div class="empty">届く通知はありません</div>`;
   const st = pushState(), off = myOff();
   const top = st === "ask" ? `<button class="pushbtn" data-act="pushOn">🔔 通知をオンにする</button>`
     : st === "ios-browser" ? `<p class="pushnote">ホーム画面に追加すると通知が届きます</p>`
     : st === "denied" ? `<p class="pushnote">この端末では通知が止められています。端末の設定で許可してください</p>`
     : st === "unsupported" ? `<p class="pushnote">この端末では通知を使えません</p>` : "";
-  return top + `<div class="nsw">${types.map(([k, , , label]) => `
+  if (!types.length) return top + pushStatusBox(st) + `<div class="empty">届く通知はありません</div>`;
+  return top + pushStatusBox(st) + `<div class="nsw">${types.map(([k, , , label]) => `
     <label class="nsw-row"><span>${label}</span><input type="checkbox" role="switch" class="switch-in" data-pref="${k}"${off.has(k) ? "" : " checked"}></label>`).join("")}</div>`;
 }
 
@@ -1509,20 +1593,33 @@ function renderNotifyTable() {
   const el = $("ntable"); if (!el) return;
   const list = nVisible();
   if (!activeMembers().length && !S.shopUsers.length) { el.innerHTML = `<div class="empty">名簿がまだありません。「基本」タブで名簿を取り込んでください</div>`; return; }
-  const status = n => `<small class="pst${S.tokenNames.has(n) ? " ok" : ""}">${S.tokenNames.has(n) ? "スマホ許可済み" : "未許可"}</small>`;
+  // 端末の登録：許可済みなら端末の種類と登録した日。通知がオンなのに未許可の人は赤で目立たせる（このままでは何も届かない）
+  const PLAT = { ios: "iPhone", android: "Android", pc: "PC" };
+  const anyOn = n => NTYPES.some(([k]) => (S.notify[k] || []).includes(n));
+  const status = n => {
+    const ts = S.tokens.filter(t => t.name === n);
+    if (!ts.length) return `<small class="pst${anyOn(n) ? " ng" : ""}"${anyOn(n) ? ' title="スマホで「🔔 通知をオンにする」を押していないので、何も届きません"' : ""}>未許可</small>`;
+    const last = new Date(Math.max(...ts.map(t => t.at)));
+    const kinds = ts.map(t => PLAT[t.platform] || t.platform).join("・");
+    return `<small class="pst ok">スマホ許可済み</small><small class="pdate">${esc(kinds)}　登録 ${last.getMonth() + 1}/${last.getDate()}</small>`;
+  };
+  const rowCls = n => (anyOn(n) && !S.tokenNames.has(n) ? ' class="nng"' : "");
+  const onPeople = [...activeMembers().map(m => m.name), ...S.shopUsers].filter(anyOn);
+  const ngN = onPeople.filter(n => !S.tokenNames.has(n)).length;
+  const summary = onPeople.length ? `<div class="nsum">通知がオンの人 ${onPeople.length}人のうち、スマホで許可済み ${onPeople.length - ngN}人・<b>未許可 ${ngN}人</b>（未許可の人には何も届きません。スマホの「🔔 通知をオンにする」を押してもらってください）</div>` : "";
   const shop = nVisibleShop().sort((a, b) => a.localeCompare(b, "ja"));
-  const shopRows = !shop.length ? "" : `<tr class="ngrp"><td colspan="5">${SHOP_NAME}</td></tr>` + shop.map(n => `<tr>
+  const shopRows = !shop.length ? "" : `<tr class="ngrp"><td colspan="5">${SHOP_NAME}</td></tr>` + shop.map(n => `<tr${rowCls(n)}>
       <td class="nname"><b>${esc(shortShop(n))}</b>${status(n)}</td>
       ${NTYPES.map(([k, l]) => (SHOP_TYPES.includes(k)
         ? `<td><input type="checkbox" data-ntype="${k}" data-name="${esc(n)}"${(S.notify[k] || []).includes(n) ? " checked" : ""} aria-label="${esc(n)} ${l}"></td>`
         : `<td class="nna">—</td>`)).join("")}</tr>`).join("");
   const rows = MGROUPS.map(g => {
     const ms = list.filter(m => mGroupOf(m) === g).sort((a, b) => byLen(a.name, b.name));
-    return !ms.length ? "" : `<tr class="ngrp"><td colspan="5">${g}</td></tr>` + ms.map(m => `<tr>
+    return !ms.length ? "" : `<tr class="ngrp"><td colspan="5">${g}</td></tr>` + ms.map(m => `<tr${rowCls(m.name)}>
       <td class="nname"><b>${esc(m.name)}</b>${status(m.name)}</td>
       ${NTYPES.map(([k, l]) => `<td><input type="checkbox" data-ntype="${k}" data-name="${esc(m.name)}"${(S.notify[k] || []).includes(m.name) ? " checked" : ""} aria-label="${esc(m.name)} ${l}"></td>`).join("")}</tr>`).join("");
   }).join("") + shopRows;
-  el.innerHTML = `<table class="ntable"><thead><tr><th>名前</th>${NTYPES.map(([k, l, when]) =>
+  el.innerHTML = summary + `<table class="ntable"><thead><tr><th>名前</th>${NTYPES.map(([k, l, when]) =>
     `<th>${l}<small>${when()}</small><div class="nall"><button type="button" class="btn ghost small" data-act="nAll" data-val="${k}" data-id="on">全員オン</button><button type="button" class="btn ghost small" data-act="nAll" data-val="${k}" data-id="off">全員オフ</button></div></th>`).join("")}</tr></thead>
     <tbody>${rows || `<tr><td colspan="5"><div class="empty">該当する名前がありません</div></td></tr>`}</tbody></table>`;
 }
@@ -1988,6 +2085,7 @@ document.addEventListener("click", e => {
     case "meMenu": ui.menu = !ui.menu; render(); break;
     case "goNotify": go({ name: "notify" }); break;
     case "pushOn": enablePush(); break;
+    case "pushTest": sendTestPush(); break;
     case "setTab": showSetTab(val); break;
     case "nAll": setNotifyAll(val, id === "on"); break;
     case "view": lsSet("sharyo_view", val); applyView(); break;
@@ -2181,10 +2279,13 @@ function startSync() {
     S.shopUsers = [...new Set(snap.docs.map(d => d.get("name")).filter(Boolean))]; renderNotifyTable();
   }, nwarn);
   onSnapshot(collection(db, "pushTokens"), snap => {
-    S.tokenNames = new Set(snap.docs.map(d => d.get("name")).filter(Boolean)); renderNotifyTable();
+    S.tokens = snap.docs.map(d => { const t = d.get("updatedAt"); return { id: d.id, name: d.get("name"), platform: d.get("platform"), at: t && t.toMillis ? t.toMillis() : 0 }; });
+    S.tokenIds = new Set(S.tokens.map(t => t.id));
+    S.tokenNames = new Set(S.tokens.map(t => t.name).filter(Boolean)); renderNotifyTable();
+    if (ui.view === "phone" && ui.screen.name === "notify") render();
   }, nwarn);
-  // 許可済みの端末は、開くたびにトークンを取り直して保存する（変わっていたり、無効として消されていても戻る）
-  if (ME && pushState() === "on") saveToken().catch(e => console.warn(e));
+  // 許可済みの端末は、開くたびにトークンを取り直して保存する。サーバーで無効として消されていたら、古い登録を捨てて取り直す
+  if (ME && pushState() === "on") checkMyPush().catch(e => console.warn(e));
 }
 
 applyView();

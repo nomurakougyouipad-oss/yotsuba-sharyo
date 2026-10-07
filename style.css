@@ -495,6 +495,19 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
 .ntable tr.ngrp td{text-align:left;font-weight:900;color:var(--mute);background:var(--bg);padding:4px 12px;font-size:13px}
 .pst{font-size:11px;color:var(--mute);border:1px solid var(--line-strong);border-radius:6px;padding:1px 6px;font-weight:700}
 .pst.ok{color:var(--free-t);border-color:var(--free-t)}
+/* 通知がオンなのに未許可の人（何も届かない）は赤で目立たせる。許可済みの人は端末と登録した日 */
+.pst.ng{color:#fff;background:var(--fix);border-color:var(--fix)}
+.ntable tr.nng td.nname{background:var(--fix-bg)}
+.pdate{display:block;font-size:11px;color:var(--mute);margin-top:2px}
+.nsum{padding:8px 12px;font-size:13px;border-bottom:1.5px solid var(--line);background:var(--bg)}
+.nsum b{color:var(--fix-t)}
+/* スマホの「🔔 通知」：この端末の登録の状態とテスト通知 */
+.pstatus{border-radius:12px;padding:10px 12px;margin:0 0 10px;border:1.5px solid var(--line-strong);overflow-wrap:anywhere}
+.pstatus b{display:block;font-size:15px}
+.pstatus small{display:block;margin-top:4px;font-size:12px;color:var(--mute)}
+.pstatus.ok{background:var(--free-bg);border-color:var(--free)} .pstatus.ok b{color:var(--free-t)}
+.pstatus.ng{background:var(--fix-bg);border-color:var(--fix)} .pstatus.ng b{color:var(--fix-t)}
+.btn.ptest{padding:12px;font-size:16px;margin:0 0 14px}
 #sform.modal{width:min(820px,100%)} /* 通知の表が横に収まるよう、設定だけ少し広く */
 
 /* ---- 車検中（紫） ---- */

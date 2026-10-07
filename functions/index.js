@@ -3,6 +3,7 @@
 // 2. 返却予定日：予約の to の日の17時、まだ返却されていなければ（使う人本人だけ）
 // 3. 返却遅れ：to の翌日の朝9時、まだ返却されていなければ（使う人本人だけ）
 // 4. 修理依頼：repairs に新しく登録されたとき、すぐ
+// 5. テスト通知：スマホの「🔔 通知」画面の「テスト通知を送る」から（押した本人のその端末にだけ）
 //
 // 届く人 = PCの設定（settings/notify）でオン かつ 本人がスマホでオフにしていない（notifyPrefs）かつ 通知を許可した端末がある（pushTokens）
 // 同じ通知が2回届かないよう、notifyLog/{通知のキー} に送った人を残す
@@ -38,7 +39,7 @@ async function loadAudience() {
   const off = new Map(prefs.docs.map(d => [d.get("name"), new Set(d.get("off") || [])]));
   const byName = new Map();
   // app: "shop" はトラストワンのページの端末（通知を押すと shop.html を開く）
-  tokens.forEach(d => { const n = d.get("name"); if (!n) return; if (!byName.has(n)) byName.set(n, []); byName.get(n).push({ token: d.id, app: d.get("app") === "shop" ? "shop" : "staff" }); });
+  tokens.forEach(d => { const n = d.get("name"); if (!n) return; if (!byName.has(n)) byName.set(n, []); byName.get(n).push({ token: d.id, name: n, app: d.get("app") === "shop" ? "shop" : "staff" }); });
   const on = type => new Set(cfg.exists ? cfg.get(type) || [] : []);
   return {
     // この通知が届く人（端末がある人だけ）。only を渡すとその人たちの中から
@@ -71,13 +72,14 @@ const APP_URL = { staff: "./", shop: "./shop.html" };
 // 端末（{ token, app }）を、開くページごとに分けて送る
 async function send(targets, msg) {
   for (const app of Object.keys(APP_URL)) {
-    const tokens = targets.filter(t => t.app === app).map(t => t.token);
-    if (tokens.length) await sendTo(tokens, { ...msg, url: APP_URL[app] });
+    const list = targets.filter(t => t.app === app);
+    if (list.length) await sendTo(list.map(t => t.token), { ...msg, url: APP_URL[app] }, list.map(t => t.name));
   }
 }
-async function sendTo(tokens, { title, body, tag, url }) {
+// names：tokens と同じ順の名前（だれの端末で失敗したかをログに残す）
+async function sendTo(tokens, { title, body, tag, url }, names = []) {
   for (let i = 0; i < tokens.length; i += 500) {
-    const chunk = tokens.slice(i, i + 500);
+    const chunk = tokens.slice(i, i + 500), who = j => names[i + j] || "?";
     // data だけで送り、表示は sw.js が行う（iPhone でも同じ動きにするため）
     const res = await getMessaging().sendEachForMulticast({
       tokens: chunk,
@@ -87,8 +89,8 @@ async function sendTo(tokens, { title, body, tag, url }) {
     const dead = [];
     res.responses.forEach((r, j) => {
       if (r.success) return;
-      if (DEAD.has(r.error && r.error.code)) dead.push(chunk[j]);
-      else logger.warn("送れませんでした", r.error && r.error.code, r.error && r.error.message);
+      if (DEAD.has(r.error && r.error.code)) { dead.push(chunk[j]); logger.warn(`無効な端末（${who(j)}）`, r.error.code); }
+      else logger.warn(`送れませんでした（${who(j)}）`, r.error && r.error.code, r.error && r.error.message);
     });
     await Promise.all(dead.map(t => db.collection("pushTokens").doc(t).delete().catch(() => {})));
     logger.info(`通知「${title}」${res.successCount}件送信、無効な端末 ${dead.length}件を削除`);
@@ -154,4 +156,40 @@ exports.repairCreated = onDocumentCreated("repairs/{id}", async e => {
   await notify(aud, `repair_${e.params.id}`, names,
     { title: "🔧 修理依頼が来ました", body: [car.exists ? carText(car.data()) : "", short].filter(Boolean).join("　") },
     { type: "repair", repairId: e.params.id });
+});
+
+/* ---------- 5. テスト通知（スマホの「🔔 通知」画面の「テスト通知を送る」。押した本人のその端末にだけ） ---------- */
+// アプリが pushTests に { token, name, at } を1件書く → ここで送って、結果を同じ記録の result に書き戻す（アプリはそれを見て画面に出す）
+//   result：{ ok: true } ／ { ok: false, code: "not-registered"（サーバーに登録がない）| "dead"（無効だったので登録を消した）| "too-soon" | そのほかのエラー }
+// （会社の決まりで、だれでも呼べるサーバーの入口は作れないため、修理依頼と同じく記録をきっかけに動かす）
+const TEST_GAP_MS = 20000; // 同じ端末に続けて送らない
+exports.pushTestCreated = onDocumentCreated("pushTests/{id}", async e => {
+  const x = e.data && e.data.data(); if (!x) return;
+  const done = result => e.data.ref.update({ result, doneAt: FieldValue.serverTimestamp() }).catch(err => logger.warn("テスト通知の結果を書けません", err.message));
+  const token = String(x.token || "");
+  if (!token || token.length > 1000 || token.includes("/")) return done({ ok: false, code: "not-registered" });
+  const ref = db.collection("pushTokens").doc(token), snap = await ref.get();
+  if (!snap.exists) return done({ ok: false, code: "not-registered" }); // 登録されている端末にだけ送る
+  const name = snap.get("name") || "", app = snap.get("app") === "shop" ? "shop" : "staff";
+  const last = snap.get("lastTestAt");
+  if (last && last.toMillis && Date.now() - last.toMillis() < TEST_GAP_MS) return done({ ok: false, code: "too-soon" });
+  await ref.update({ lastTestAt: FieldValue.serverTimestamp() }).catch(() => {});
+  try {
+    await getMessaging().send({
+      token,
+      data: { title: "🔔 テスト通知", body: `${name}さんのこの端末に、通知が届いています`, tag: "test", url: APP_URL[app] },
+      webpush: { headers: { Urgency: "high", TTL: "600" } },
+    });
+    logger.info(`テスト通知を送りました（${name}・${snap.get("platform") || ""}）`);
+    return done({ ok: true });
+  } catch (err) {
+    const code = (err && err.code) || "unknown";
+    if (DEAD.has(code)) {
+      await ref.delete().catch(() => {});
+      logger.warn(`テスト通知：無効な端末（${name}）を消しました`, code);
+      return done({ ok: false, code: "dead" });
+    }
+    logger.warn(`テスト通知を送れませんでした（${name}）`, code, err && err.message);
+    return done({ ok: false, code });
+  }
 });

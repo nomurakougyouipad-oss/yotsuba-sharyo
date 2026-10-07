@@ -176,6 +176,16 @@ service cloud.firestore {
         && optStr(request.resource.data, 'platform', 20);
       allow delete: if signedIn();
     }
+    // テスト通知の頼み（スマホの「🔔 通知」→「テスト通知を送る」）。書くのは「どの端末に」「だれが」「いつ」だけ
+    // 送るのと結果（result）を書き戻すのはサーバー（Cloud Functions）。アプリからは書き直し・削除はできない
+    match /pushTests/{id} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['token', 'name', 'at'])
+        && str(request.resource.data.token, 1000)
+        && optStr(request.resource.data, 'name', 40)
+        && request.resource.data.at == request.time;
+    }
     // トラストワンの人（専用ページで名前を入れた人）。PCの通知の設定に「トラストワン」として出す
     match /shopUsers/{userId} {
       allow read: if signedIn();
