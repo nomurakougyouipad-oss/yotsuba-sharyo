@@ -35,7 +35,7 @@ const db = initializeFirestore(fbApp, { localCache: persistentLocalCache({ tabMa
 const storage = getStorage(fbApp);
 
 /* ---------- 定数 ---------- */
-const APP_VERSION = "23"; // 版の番号（名前のメニューの下に出す）。sw.js の CACHE（sharyo-v○○）と同じ番号にする
+const APP_VERSION = "24"; // 版の番号（名前のメニューの下に出す）。sw.js の CACHE（sharyo-v○○）と同じ番号にする
 const TYPES = ["トラック", "バン", "普通車"];
 const SHOP_NAME = "トラストワン"; // 整備工場（子会社）の名前。専用ページは shop.html
 const LABEL = { free: "空き", use: "使用中", fix: "修理中", own: "専用", insp: "車検中" };
@@ -51,7 +51,7 @@ const S = {
   vehicles: [], reservations: [], repairs: [],
   settings: { ...DEFAULT_SETTINGS }, settingsExists: false,
   members: [], membersLoaded: false, // 名簿（日報アプリと同じ形：name / kubun / shozoku / active）
-  notify: {}, notifyLoaded: false, // 通知を届ける人（PCで選ぶ）：{ shaken: [名前…], due: […], overdue: […], repair: […] }
+  notify: {}, notifyLoaded: false, // 通知を届ける人（PCで選ぶ）：{ shaken: [名前…], due: […], overdue: […], repair: […], wish: […], avail: […] }
   prefs: new Map(), // 本人がスマホでオフにした通知：名前 → Set(種類)
   tokenNames: new Set(), // 通知を許可した端末がある人の名前
   tokens: [], tokenIds: new Set(), // 端末の登録（PCの通知タブに、人ごとの端末と登録した日を出す）
@@ -915,12 +915,16 @@ function myBar() {
 
 /* ---------- プッシュ通知（届く人は PC で選ぶ。本人はスマホでオフにできる） ---------- */
 const NTYPES = [
-  // 種類, PCの列の見出し, いつ, スマホのスイッチ
-  ["shaken", "車検", () => `${alertDays()}日前 8時`, "車検が近い"],
-  ["due", "返却予定日", () => "当日 17時", "今日が返却予定日"],
-  ["overdue", "返却遅れ", () => "翌日 9時", "返却予定を過ぎた"],
-  ["repair", "修理依頼", () => "すぐ", "修理依頼が来た"],
+  // 種類, PCの列の見出し, いつ, スマホのスイッチ, だれに届くか（all：社員とトラストワン／staff：社員だけ／shop：トラストワンだけ）
+  ["shaken", "車検", () => `${alertDays()}日前 8時`, "車検が近い", "all"],
+  ["due", "返却予定日", () => "当日 17時", "今日が返却予定日", "staff"],
+  ["overdue", "返却遅れ", () => "翌日 9時", "返却予定を過ぎた", "staff"],
+  ["repair", "修理依頼", () => "すぐ", "修理依頼が来た", "all"],
+  ["wish", "車検の希望日", () => "トラストワンが入れたらすぐ", "トラストワンから車検の希望日が来た", "staff"],
+  ["avail", "預けられる日が決まった", () => "会社が入れたらすぐ", "預けられる日が決まった", "shop"],
 ];
+const STAFF_TYPES = NTYPES.filter(t => t[4] !== "shop").map(t => t[0]);
+const SHOP_TYPES = NTYPES.filter(t => t[4] !== "staff").map(t => t[0]);
 const TOKEN_KEY = "sharyo_push_token";
 const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 const isStandalone = () => navigator.standalone === true || matchMedia("(display-mode: standalone)").matches;
@@ -1407,8 +1411,23 @@ async function uploadRepairPhotos(repairId, files, onProgress) {
 }
 
 // PC: 車検が近い車（60日以内。通知日数を60日より長くしたときはその日数まで）
-// 車検で預けられる日（トラストワンの画面に出る）。車検中の車には出さない
-const availInput = v => (v.inspection ? "" : `<label class="avail" data-act="avail"><span>預けられる日</span><input type="date" data-act="avail" data-avail="${v.id}" value="${esc(v.availDate || "")}" min="${ymd(today())}" aria-label="${esc(v.kind)} の預けられる日"></label>`);
+// 車検で預けられる日（トラストワンの画面に「よつば確定」と出る。入れるとトラストワンに通知）。車検中の車には出さない
+// トラストワンが希望日（取りに行きたい日）を入れていれば「トラスト希望 10/15」と「この日でOK」（押すと預けられる日にその日が入る）
+const wishOf = v => (v.shopWish && v.shopWish.date && (!v.shopWish.shaken || v.shopWish.shaken === v.shakenDate) ? v.shopWish : null); // 前の車検のときの希望は使わない
+function wishHtml(v) {
+  const w = wishOf(v); if (!w) return "";
+  const ok = w.date === v.availDate, past = w.date < ymd(today());
+  return `<span class="hope${ok ? " ok" : ""}" title="${esc(w.by || SHOP_NAME)}が入れた希望日">トラスト希望 ${fmt(w.date)}（${DOW[parse(w.date).getDay()]}）${ok ? " ✓" : past ? "（過ぎています）" : ""}</span>`
+    + (ok || past ? "" : `<button type="button" class="btn free small" data-act="wishOk" data-id="${v.id}">この日でOK</button>`);
+}
+const availInput = v => (v.inspection ? "" : `<div class="avail" data-act="avail">${wishHtml(v)}<label><span>預けられる日</span><input type="date" data-act="avail" data-avail="${v.id}" value="${esc(v.availDate || "")}" min="${ymd(today())}" aria-label="${esc(v.kind)} の預けられる日"></label></div>`);
+// 「この日でOK」：トラストワンの希望日を、そのまま預けられる日にする
+function acceptWish(id) {
+  const v = byId(id), w = v && wishOf(v); if (!w || v.inspection) return;
+  updateDoc(doc(db, "vehicles", v.id), { availDate: w.date, updatedAt: serverTimestamp() })
+    .catch(e => { console.error(e); toast("保存できませんでした。もう一度お試しください", "err"); });
+  toast(`預けられる日を ${fmt(w.date)} にしました（${SHOP_NAME}に知らせます）`);
+}
 function setAvail(el) {
   updateDoc(doc(db, "vehicles", el.dataset.avail), { availDate: el.value || null, updatedAt: serverTimestamp() })
     .catch(e => { console.error(e); toast("保存できませんでした。もう一度お試しください", "err"); });
@@ -1594,8 +1613,7 @@ function showSetTab(k) {
 
 // 設定 → 通知：名簿の人が行、4つの通知が列。チェックでオン・オフ（すぐ保存）
 let nQuery = "";
-// トラストワンの人（専用ページで名前を入れた人）。名前は「山岡（トラストワン）」の形。届く通知は修理依頼と車検だけ
-const SHOP_TYPES = ["shaken", "repair"];
+// トラストワンの人（専用ページで名前を入れた人）。名前は「山岡（トラストワン）」の形。届く通知は SHOP_TYPES（修理依頼・車検・預けられる日が決まった）だけ
 const shortShop = n => n.replace(/（[^（）]*）$/, "");
 const nMatch = n => { const q = nQuery.trim(); return !q || n.includes(q); };
 const nVisible = () => activeMembers().filter(m => nMatch(m.name));
@@ -1619,20 +1637,22 @@ function renderNotifyTable() {
   const ngN = onPeople.filter(n => !S.tokenNames.has(n)).length;
   const summary = onPeople.length ? `<div class="nsum">通知がオンの人 ${onPeople.length}人のうち、スマホで許可済み ${onPeople.length - ngN}人・<b>未許可 ${ngN}人</b>（未許可の人には何も届きません。スマホの「🔔 通知をオンにする」を押してもらってください）</div>` : "";
   const shop = nVisibleShop().sort((a, b) => a.localeCompare(b, "ja"));
-  const shopRows = !shop.length ? "" : `<tr class="ngrp"><td colspan="5">${SHOP_NAME}</td></tr>` + shop.map(n => `<tr${rowCls(n)}>
+  const shopRows = !shop.length ? "" : `<tr class="ngrp"><td colspan="${NTYPES.length + 1}">${SHOP_NAME}</td></tr>` + shop.map(n => `<tr${rowCls(n)}>
       <td class="nname"><b>${esc(shortShop(n))}</b>${status(n)}</td>
       ${NTYPES.map(([k, l]) => (SHOP_TYPES.includes(k)
         ? `<td><input type="checkbox" data-ntype="${k}" data-name="${esc(n)}"${(S.notify[k] || []).includes(n) ? " checked" : ""} aria-label="${esc(n)} ${l}"></td>`
         : `<td class="nna">—</td>`)).join("")}</tr>`).join("");
   const rows = MGROUPS.map(g => {
     const ms = list.filter(m => mGroupOf(m) === g).sort((a, b) => byLen(a.name, b.name));
-    return !ms.length ? "" : `<tr class="ngrp"><td colspan="5">${g}</td></tr>` + ms.map(m => `<tr${rowCls(m.name)}>
+    return !ms.length ? "" : `<tr class="ngrp"><td colspan="${NTYPES.length + 1}">${g}</td></tr>` + ms.map(m => `<tr${rowCls(m.name)}>
       <td class="nname"><b>${esc(m.name)}</b>${status(m.name)}</td>
-      ${NTYPES.map(([k, l]) => `<td><input type="checkbox" data-ntype="${k}" data-name="${esc(m.name)}"${(S.notify[k] || []).includes(m.name) ? " checked" : ""} aria-label="${esc(m.name)} ${l}"></td>`).join("")}</tr>`).join("");
+      ${NTYPES.map(([k, l]) => (STAFF_TYPES.includes(k)
+        ? `<td><input type="checkbox" data-ntype="${k}" data-name="${esc(m.name)}"${(S.notify[k] || []).includes(m.name) ? " checked" : ""} aria-label="${esc(m.name)} ${l}"></td>`
+        : `<td class="nna">—</td>`)).join("")}</tr>`).join("");
   }).join("") + shopRows;
   el.innerHTML = summary + `<table class="ntable"><thead><tr><th>名前</th>${NTYPES.map(([k, l, when]) =>
     `<th>${l}<small>${when()}</small><div class="nall"><button type="button" class="btn ghost small" data-act="nAll" data-val="${k}" data-id="on">全員オン</button><button type="button" class="btn ghost small" data-act="nAll" data-val="${k}" data-id="off">全員オフ</button></div></th>`).join("")}</tr></thead>
-    <tbody>${rows || `<tr><td colspan="5"><div class="empty">該当する名前がありません</div></td></tr>`}</tbody></table>`;
+    <tbody>${rows || `<tr><td colspan="${NTYPES.length + 1}"><div class="empty">該当する名前がありません</div></td></tr>`}</tbody></table>`;
 }
 function setNotify(type, names, on) {
   if (!names.length) return;
@@ -1641,7 +1661,7 @@ function setNotify(type, names, on) {
 }
 // 列ごとの「全員オン」「全員オフ」（名前で探しているときは、出ている人だけ）
 function setNotifyAll(type, on) {
-  const names = [...nVisible().map(m => m.name), ...(SHOP_TYPES.includes(type) ? nVisibleShop() : [])];
+  const names = [...(STAFF_TYPES.includes(type) ? nVisible().map(m => m.name) : []), ...(SHOP_TYPES.includes(type) ? nVisibleShop() : [])];
   const label = NTYPES.find(t => t[0] === type)[1];
   if (!confirm(`「${label}」の通知を、${nQuery.trim() ? `表示している ${names.length}人` : `全員（${names.length}人）`}${on ? "オン" : "オフ"}にしますか？`)) return;
   setNotify(type, names, on);
@@ -1869,9 +1889,9 @@ function saveInspOut(f) {
     vehicleId: v.id, outDate: from, expectedBack: until, backDate: null,
     oldShakenDate: v.shakenDate, newShakenDate: null, outBy: operator(), backBy: null, returnedLot: null,
     outAt: serverTimestamp(), backAt: null,
-    prev: { currentLot: v.currentLot || null, availDate: v.availDate || null }, // 車検に出す前の状態（間違えたときに「車検を取り消す」で戻す）
+    prev: { currentLot: v.currentLot || null, availDate: v.availDate || null, shopWish: v.shopWish || null }, // 車検に出す前の状態（間違えたときに「車検を取り消す」で戻す）
   });
-  b.update(doc(db, "vehicles", v.id), { inspection: { id: rec.id, from, until }, availDate: null, updatedAt: serverTimestamp() });
+  b.update(doc(db, "vehicles", v.id), { inspection: { id: rec.id, from, until }, availDate: null, shopWish: null, updatedAt: serverTimestamp() });
   b.commit().catch(e => { console.error(e); toast("車検に出せませんでした。もう一度お試しください", "err"); });
   closeModal();
   toast("車検に出しました");
@@ -1909,7 +1929,7 @@ function saveInspBack(f) {
   if (date <= v.shakenDate) return showFerr(`新しい車検満了日は、今の満了日（${jp(v.shakenDate)}）より後にしてください`);
   if (!lot) return showFerr("置き場所を選んでください");
   const b = writeBatch(db);
-  b.update(doc(db, "vehicles", v.id), { shakenDate: date, currentLot: lot, inspection: null, availDate: null, updatedAt: serverTimestamp() });
+  b.update(doc(db, "vehicles", v.id), { shakenDate: date, currentLot: lot, inspection: null, availDate: null, shopWish: null, updatedAt: serverTimestamp() });
   if (v.inspection.id) b.set(doc(db, "inspections", v.inspection.id), {
     vehicleId: v.id, backDate: ymd(today()), newShakenDate: date, backBy: operator(), returnedLot: lot, backAt: serverTimestamp(),
   }, { merge: true });
@@ -1936,6 +1956,7 @@ async function undoInsp(id) {
   const now = byId(id); if (!now || !now.inspection || now.inspection.id !== x.id) { closeModal(); return; } // 確かめている間にほかの所で変わった
   const data = { inspection: null, updatedAt: serverTimestamp() };
   if (prev) data.availDate = prev.availDate || null;
+  if (prev && "shopWish" in prev) data.shopWish = prev.shopWish || null; // トラストワンの希望日も戻す（版24から）
   if (lot) data.currentLot = lot;
   const b = writeBatch(db);
   b.update(doc(db, "vehicles", v.id), data);
@@ -2197,6 +2218,7 @@ document.addEventListener("click", e => {
     case "retire": retireVehicle(modalId); break;
     case "restore": restoreVehicle(id); break;
     case "avail": break; // 預けられる日の欄（押しても車の修正画面を開かない）
+    case "wishOk": acceptWish(id); break;
     case "inspOut": openInspOut(id); break;
     case "inspBack": openInspBack(id); break;
     case "inspUndo": undoInsp(id); break;

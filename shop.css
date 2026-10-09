@@ -3,16 +3,17 @@
   --head:#2C4966; --bg:#EEF0EC; --card:#FFFFFF; --fg:#1F2A33; --sub:#5E6A72; --line:#D9DDD6;
   --free:#2E9E5B; --use:#E08A1E; --fix:#C8443A; --insp:#7A5BB5; --shop:#2C4966;
   --chip:#F2F4F0; --btn-fg:#FFFFFF; --shadow:0 1px 2px rgba(31,42,51,.08);
+  --ok-bg:#E2F3E8; --ok-t:#1D7144;
   --font:"Zen Kaku Gothic New","Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
   --head:#1E3247; --bg:#171B20; --card:#22282F; --fg:#E7EAEC; --sub:#9AA5AD; --line:#343C44;
   --free:#3FB872; --use:#F0A040; --fix:#E0645A; --insp:#A58BE0; --shop:#7FA3C8;
-  --chip:#2B323A; --btn-fg:#FFFFFF; --shadow:none; color-scheme:dark }}
+  --chip:#2B323A; --btn-fg:#FFFFFF; --shadow:none; --ok-bg:#1E3A2A; --ok-t:#7FD6A2; color-scheme:dark }}
 :root[data-theme="dark"]{
   --head:#1E3247; --bg:#171B20; --card:#22282F; --fg:#E7EAEC; --sub:#9AA5AD; --line:#343C44;
   --free:#3FB872; --use:#F0A040; --fix:#E0645A; --insp:#A58BE0; --shop:#7FA3C8;
-  --chip:#2B323A; --btn-fg:#FFFFFF; --shadow:none; color-scheme:dark }
+  --chip:#2B323A; --btn-fg:#FFFFFF; --shadow:none; --ok-bg:#1E3A2A; --ok-t:#7FD6A2; color-scheme:dark }
 *{box-sizing:border-box}
 html,body{height:100%}
 body{background:var(--bg);color:var(--fg);font-family:var(--font);font-size:16px;margin:0}
@@ -95,3 +96,9 @@ header .who{border:0;color:#fff;font:inherit;font-size:13px;cursor:pointer}
 /* 車検で預かる：期間に予約があるとき */
 .clash{background:var(--chip);border-left:4px solid var(--use);border-radius:8px;padding:10px 12px;font-size:14px;display:flex;flex-direction:column;gap:4px}
 .clash b{color:var(--use)}
+/* 車検の日決め：会社が決めた預けられる日（緑）・こちらの希望日 */
+.wish.fixed{background:var(--ok-bg);color:var(--ok-t);font-weight:700}
+.hope{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:14px;color:var(--sub)}
+.hope b{color:var(--fg);font-variant-numeric:tabular-nums}
+.hope .btn{width:auto;flex:none;min-height:44px;padding:6px 14px;font-size:15px}
+.pushbox{display:flex;flex-direction:column;gap:6px}

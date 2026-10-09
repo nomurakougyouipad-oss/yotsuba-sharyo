@@ -50,7 +50,14 @@ service cloud.firestore {
         && (!('hidden' in d) || d.hidden is bool)
         && (!('inspection' in d) || d.inspection == null || validInspState(d.inspection))
         && optDate(d, 'availDate')
+        && (!('shopWish' in d) || d.shopWish == null || validWish(d.shopWish))
         && d.retired is bool;
+    }
+    // トラストワンの車検の希望日（取りに行きたい日）：日・入れた人・入れた時・どの満了日のための希望か
+    function validWish(x) {
+      return x is map && x.keys().hasOnly(['date', 'by', 'at', 'shaken'])
+        && isDate(x.date) && optStr(x, 'by', 60) && optDate(x, 'shaken')
+        && (!('at' in x) || x.at == null || x.at is timestamp);
     }
     // 車検中の印（vehicles の inspection）：出した日・戻り予定日（任意）・記録のID
     function validInspState(x) {
@@ -141,13 +148,14 @@ service cloud.firestore {
         && (!('lots' in d) || (d.lots is list && d.lots.size() >= 1 && d.lots.size() <= 5))
         && (!('shakenAlertDays' in d) || (d.shakenAlertDays is int && d.shakenAlertDays >= 1 && d.shakenAlertDays <= 365));
     }
-    // 通知を届ける人（PCの設定 → 通知）：通知の種類ごとに名前のリスト
+    // 通知を届ける人（PCの設定 → 通知）：通知の種類ごとに名前のリスト（wish：車検の希望日、avail：預けられる日が決まった）
     function nameList(d, k) {
       return !(k in d) || (d[k] is list && d[k].size() <= 500);
     }
     function validNotify(d) {
-      return d.keys().hasOnly(['shaken', 'due', 'overdue', 'repair', 'updatedAt'])
-        && nameList(d, 'shaken') && nameList(d, 'due') && nameList(d, 'overdue') && nameList(d, 'repair');
+      return d.keys().hasOnly(['shaken', 'due', 'overdue', 'repair', 'wish', 'avail', 'updatedAt'])
+        && nameList(d, 'shaken') && nameList(d, 'due') && nameList(d, 'overdue') && nameList(d, 'repair')
+        && nameList(d, 'wish') && nameList(d, 'avail');
     }
     match /settings/{docId} {
       allow read: if signedIn();
@@ -163,7 +171,7 @@ service cloud.firestore {
       allow create, update: if signedIn()
         && request.resource.data.keys().hasOnly(['name', 'off', 'updatedAt'])
         && str(request.resource.data.name, 40)
-        && request.resource.data.off is list && request.resource.data.off.size() <= 4;
+        && request.resource.data.off is list && request.resource.data.off.size() <= 10;
     }
     // 通知を許可した端末（ID が通知トークン）。名前とひもづける。1人が複数の端末でもよい
     // app: "shop" はトラストワンのページ（通知を押すと shop.html が開く）

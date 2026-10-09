@@ -490,7 +490,8 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
 .ntable th{position:sticky;top:0;z-index:1;background:var(--paper);border-bottom:1.5px solid var(--line);padding:8px 6px;font-size:14px;text-align:center;vertical-align:top;white-space:nowrap}
 .ntable th:first-child{text-align:left;vertical-align:bottom;padding-left:12px}
 .ntable th small{display:block;font-weight:500;color:var(--mute);font-size:12px}
-.ntable .nall{display:flex;gap:4px;justify-content:center;margin-top:6px}
+.ntable .nall{display:flex;flex-direction:column;align-items:center;gap:4px;margin-top:6px}
+.ntable th:not(:first-child){white-space:normal;min-width:84px} /* 長い見出し（預けられる日が決まった）は2行に */
 .ntable .nall .btn.small{padding:4px 7px;font-size:12px;min-height:28px;border-width:1.5px}
 .ntable td{padding:6px;border-bottom:1px solid var(--line);text-align:center}
 .ntable td.nname{text-align:left;padding-left:12px;white-space:nowrap}
@@ -512,7 +513,7 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
 .pstatus.ok{background:var(--free-bg);border-color:var(--free)} .pstatus.ok b{color:var(--free-t)}
 .pstatus.ng{background:var(--fix-bg);border-color:var(--fix)} .pstatus.ng b{color:var(--fix-t)}
 .btn.ptest{padding:12px;font-size:16px;margin:0 0 14px}
-#sform.modal{width:min(820px,100%)} /* 通知の表が横に収まるよう、設定だけ少し広く */
+#sform.modal{width:min(960px,100%)} /* 通知の表（6種類）が横に収まるよう、設定だけ広く */
 
 /* ---- 車検中（紫） ---- */
 .band.insp,.status-pill.insp{background:var(--insp)}
@@ -546,6 +547,11 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
 .avail{flex-basis:100%;display:flex;align-items:center;justify-content:flex-end;gap:6px;font-size:12px;color:var(--mute);cursor:default}
 .avail span{white-space:nowrap}
 .avail input{width:auto;padding:3px 6px;font-size:13px;border-radius:7px}
+/* トラストワンの希望日（取りに行きたい日）と「この日でOK」 */
+.avail{flex-wrap:wrap;row-gap:4px}
+.avail label{display:flex;align-items:center;gap:6px;margin:0;cursor:default}
+.avail .hope{font-weight:700;font-size:12px;padding:3px 8px;border-radius:7px;background:var(--use-bg);color:var(--use-deep);white-space:nowrap}
+.avail .hope.ok{background:var(--free-bg);color:var(--free-t)}
 .ntable td.nna{color:var(--mute)}
 
 /* =====================================================================

@@ -6,7 +6,8 @@
       "ignore": [
         "node_modules",
         ".git",
-        "*.log"
+        "*.log",
+        "*.test.js"
       ]
     }
   ],

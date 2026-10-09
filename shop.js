@@ -51,7 +51,7 @@ const operator = () => `${ME}（${SHOP}）`; // 操作した人・通知の宛�
 
 /* ---------- データ ---------- */
 const S = {
-  vehicles: [], repairs: [], reservations: [], settings: { lots: [], shakenAlertDays: 30 }, notify: {},
+  vehicles: [], repairs: [], reservations: [], settings: { lots: [], shakenAlertDays: 30 },
   loaded: new Set(), tab: "fix",
 };
 const ready = () => ["v", "p", "r", "s"].every(k => S.loaded.has(k));
@@ -78,6 +78,18 @@ const wishHtml = w => (w
 const chipsHtml = r => ((r.symptoms || []).length ? `<div class="chips">${r.symptoms.map(s => `<span>${esc(s)}</span>`).join("")}</div>` : "");
 const period = x => `${md(x.from)}〜${x.until ? `（戻り予定 ${md(x.until)}）` : ""}`;
 const repairAt = r => { const d = r.createdAt && r.createdAt.toDate ? r.createdAt.toDate() : new Date(); return `${d.getMonth() + 1}/${d.getDate()}`; };
+const dayText = s => `${md(s)}（${WD[pd(s).getDay()]}）`;
+
+// 車検の希望日（取りに行きたい日）：こちらから会社に送る。前の車検のときの希望は使わない
+const hopeOf = v => (v.shopWish && v.shopWish.date && (!v.shopWish.shaken || v.shopWish.shaken === v.shakenDate) ? v.shopWish : null);
+// 車検が近い車：会社が決めた預けられる日（緑の「よつば確定」）と、こちらの希望日
+function dueHtml(v) {
+  const w = hopeOf(v);
+  return (v.availDate ? `<div class="wish fixed"><span>よつば確定</span><b>${dayText(v.availDate)}</b></div>`
+    : `<div class="wish none"><span>預けられる日</span><span>${w ? "会社の返事待ち" : "未定（会社に確認）"}</span></div>`)
+    + `<div class="hope"><span>${w ? `希望日 <b>${dayText(w.date)}</b>を送りました` : "取りに行きたい日を会社に送れます"}</span>
+      <button class="btn ghost" type="button" data-act="hope" data-id="${v.id}">${w ? "希望日を変える" : "希望日を入れる"}</button></div>`;
+}
 
 function card({ v, color, left, right, inner, btn, btnColor }) {
   return `<div class="card"><div class="band" style="background:var(${color})"><span>${left}</span><span class="r">${right || ""}</span></div>
@@ -93,7 +105,8 @@ function lists() {
   const open = S.repairs.filter(r => r.status === "open" && withCar(r)).sort((a, b) => millis(a.createdAt) - millis(b.createdAt));
   const shop = S.repairs.filter(r => r.status === "in_repair" && r.shop && withCar(r));
   const cars = S.vehicles.filter(v => usable(v) && !v.hidden);
-  const due = cars.filter(v => !v.inspection && v.shakenDate && days(v.shakenDate) <= alertDays()).sort((a, b) => a.shakenDate.localeCompare(b.shakenDate));
+  // 会社が預けられる日を決めた車は、30日より先でも出す（「預けられる日が決まった」の通知が届くので）
+  const due = cars.filter(v => !v.inspection && v.shakenDate && (days(v.shakenDate) <= alertDays() || v.availDate)).sort((a, b) => a.shakenDate.localeCompare(b.shakenDate));
   const insp = cars.filter(v => v.inspection).sort((a, b) => a.inspection.from.localeCompare(b.inspection.from));
   return { open, shop, due, insp };
 }
@@ -115,7 +128,7 @@ function render() {
   } else {
     h += sec(`車検が${alertDays()}日以内の車`, due.map(v => { const n = days(v.shakenDate), over = n < 0;
       return card({ v, color: over ? "--fix" : "--use", left: over ? `車検切れ ${-n}日` : (n === 0 ? "車検は今日まで" : `車検まで あと${n}日`), right: `満了 ${ymd(v.shakenDate)}`,
-        inner: wishHtml(v.availDate), btn: { act: "takeInsp", id: v.id, label: "預かる" }, btnColor: "--insp" }); }), `${alertDays()}日以内の車はありません`);
+        inner: dueHtml(v), btn: { act: "takeInsp", id: v.id, label: "預かる" }, btnColor: "--insp" }); }), `${alertDays()}日以内の車はありません`);
     h += sec("車検中の車", insp.map(v => card({ v, color: "--insp", left: "車検中", right: period(v.inspection),
       inner: `<p class="meta">今の満了日 ${ymd(v.shakenDate)}</p>`, btn: { act: "doneInsp", id: v.id, label: "車検完了" }, btnColor: "--free" })), "車検中の車はありません");
   }
@@ -156,12 +169,12 @@ function pushState() {
   if (Notification.permission === "denied") return "denied";
   return Notification.permission === "granted" && lsGet(TOKEN_KEY) ? "on" : "ask";
 }
-const notifyOn = () => ME && ["repair", "shaken"].some(t => (S.notify[t] || []).includes(operator()));
+// 届く通知（修理依頼・車検・預けられる日が決まった）は会社のPCで選ぶ。許可のボタンは、PCで選ぶ前から押せるように、いつも出す
 function pushBar() {
-  if (!notifyOn()) return "";
   const st = pushState();
-  if (st === "ask") return `<button class="pushbtn" data-act="pushOn">🔔 通知をオンにする</button>`;
-  if (st === "ios-browser") return `<p class="pushnote">ホーム画面に追加すると通知が届きます</p>`;
+  if (st === "ask") return `<div class="pushbox"><button class="pushbtn" data-act="pushOn">🔔 通知をオンにする</button><p class="pushnote">修理依頼・車検・預けられる日が決まったときに、このスマホに知らせが届きます</p></div>`;
+  if (st === "ios-browser") return `<p class="pushnote">ホーム画面に追加すると通知が届きます（共有ボタン →「ホーム画面に追加」）</p>`;
+  if (st === "denied") return `<p class="pushnote">このスマホでは通知が止められています。スマホの設定で、このページの通知を許可してください</p>`;
   return "";
 }
 let messaging = null;
@@ -275,9 +288,9 @@ function takeInsp(v) {
       vehicleId: v.id, outDate: x.d1, expectedBack: x.d2, backDate: null,
       oldShakenDate: v.shakenDate, newShakenDate: null, outBy: operator(), backBy: null, returnedLot: null, shop: SHOP,
       outAt: serverTimestamp(), backAt: null,
-      prev: { currentLot: v.currentLot || null, availDate: v.availDate || null }, // 預かる前の状態（会社のPCの「車検を取り消す」で戻す）
+      prev: { currentLot: v.currentLot || null, availDate: v.availDate || null, shopWish: v.shopWish || null }, // 預かる前の状態（会社のPCの「車検を取り消す」で戻す）
     });
-    b.update(doc(db, "vehicles", v.id), { inspection: { id: rec.id, from: x.d1, until: x.d2 }, availDate: null, updatedAt: serverTimestamp() });
+    b.update(doc(db, "vehicles", v.id), { inspection: { id: rec.id, from: x.d1, until: x.d2 }, availDate: null, shopWish: null, updatedAt: serverTimestamp() });
     b.commit().catch(fail("記録できませんでした。もう一度お試しください"));
     toast("車検中にしました。この車は予約できなくなります");
     return "";
@@ -298,7 +311,7 @@ function doneInsp(v) {
     if (nx <= cur.shakenDate) return "新しい満了日は、今の満了日より後の日にしてください";
     const lot = pickedLot(); if (!lot) return "戻した場所を選んでください";
     const b = writeBatch(db);
-    b.update(doc(db, "vehicles", v.id), { shakenDate: nx, currentLot: lot, inspection: null, availDate: null, updatedAt: serverTimestamp() });
+    b.update(doc(db, "vehicles", v.id), { shakenDate: nx, currentLot: lot, inspection: null, availDate: null, shopWish: null, updatedAt: serverTimestamp() });
     if (cur.inspection.id) b.set(doc(db, "inspections", cur.inspection.id), {
       vehicleId: v.id, backDate: iso(today()), newShakenDate: nx, backBy: operator(), returnedLot: lot, backAt: serverTimestamp(),
     }, { merge: true });
@@ -306,6 +319,25 @@ function doneInsp(v) {
     toast(`車検完了。満了日を ${ymd(nx)} にしました`);
     return "";
   });
+}
+// 車検の希望日（取りに行きたい日）を入れる・変える → 会社に通知が届く（Cloud Functions の vehicleUpdated）
+function hopeSheet(v) {
+  const w = hopeOf(v);
+  openSheet(`<h3>取りに行きたい日</h3><p class="meta">${esc(plate(v))}　${esc(v.kind)}　満了 ${ymd(v.shakenDate)}</p>
+    ${v.availDate ? `<div class="wish fixed"><span>よつば確定</span><b>${dayText(v.availDate)}</b></div>` : ""}
+    <div class="field"><label for="hd">取りに行きたい日（希望日）</label><input id="hd" type="date" value="${esc(w ? w.date : "")}" min="${iso(today())}"></div>
+    <p class="meta">送ると、会社（よつば）に通知が届きます。会社が預けられる日を決めると「よつば確定」と出ます</p>`, () => {
+    const d = $("hd").value, cur = byId(v.id);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return "取りに行きたい日を入れてください";
+    if (d < iso(today())) return "今日から先の日にしてください";
+    if (!cur || cur.inspection) return "この車はもう車検で預かっています";
+    const now = hopeOf(cur); if (now && now.date === d) return "いまの希望日と同じ日です";
+    // shaken：どの車検（満了日）のための希望か。車検が終わって満了日が変わったら、古い希望は出さない
+    updateDoc(doc(db, "vehicles", v.id), { shopWish: { date: d, by: operator(), at: serverTimestamp(), shaken: cur.shakenDate }, updatedAt: serverTimestamp() })
+      .catch(fail("送れませんでした。もう一度お試しください"));
+    toast(`希望日 ${md(d)} を会社に送りました`);
+    return "";
+  }, "この日を送る");
 }
 // 名前を変える（右上の「トラストワン」を押す）
 function nameSheet() {
@@ -330,6 +362,7 @@ document.addEventListener("click", e => {
     case "doneFix": { const r = S.repairs.find(x => x.id === id); if (r) doneFix(r); break; }
     case "takeInsp": { const v = byId(id); if (v) takeInsp(v); break; }
     case "doneInsp": { const v = byId(id); if (v) doneInsp(v); break; }
+    case "hope": { const v = byId(id); if (v) hopeSheet(v); break; }
     case "lot": $("sheet").querySelectorAll(".lot").forEach(x => x.setAttribute("aria-pressed", String(x === b))); break;
     case "plus": { const v = sheetCar && byId(sheetCar); if (!v) break; const d = pd(v.shakenDate); d.setFullYear(d.getFullYear() + Number(val)); $("nx").value = iso(d); break; } // 今の満了日から＋1年・＋2年
     case "cancel": closeSheet(); break;
@@ -355,7 +388,6 @@ function startSync() {
   onSnapshot(collection(db, "repairs"), s => { S.repairs = snapList(s); done("p"); }, onErr);
   onSnapshot(query(collection(db, "reservations"), where("returnedAt", "==", null)), s => { S.reservations = snapList(s).filter(r => !r.canceled); done("r"); }, onErr);
   onSnapshot(doc(db, "settings", "app"), d => { S.settings = { lots: [], shakenAlertDays: 30, ...(d.data() || {}) }; done("s"); }, onErr);
-  onSnapshot(doc(db, "settings", "notify"), d => { S.notify = d.data() || {}; refresh(); }, e => console.warn(e));
   if (ME && pushState() === "on") saveToken().catch(e => console.warn(e)); // 開くたびに通知の端末を保存し直す
 }
 

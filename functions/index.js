@@ -4,15 +4,18 @@
 // 3. 返却遅れ：to の翌日の朝9時、まだ返却されていなければ（使う人本人だけ）
 // 4. 修理依頼：repairs に新しく登録されたとき、すぐ
 // 5. テスト通知：スマホの「🔔 通知」画面の「テスト通知を送る」から（押した本人のその端末にだけ）
+// 6. 車検の希望日：トラストワンが整備のページで取りに行きたい日を入れた・変えたら、すぐ（会社の人へ）
+// 7. 預けられる日が決まった：会社がPCで預けられる日を入れた・変えたら、すぐ（トラストワンの人へ）
 //
 // 届く人 = PCの設定（settings/notify）でオン かつ 本人がスマホでオフにしていない（notifyPrefs）かつ 通知を許可した端末がある（pushTokens）
 // 同じ通知が2回届かないよう、notifyLog/{通知のキー} に送った人を残す
 const { onSchedule } = require("firebase-functions/v2/scheduler");
-const { onDocumentCreated } = require("firebase-functions/v2/firestore");
+const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { setGlobalOptions, logger } = require("firebase-functions/v2");
 const { initializeApp } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
+const { vehicleNotices } = require("./notices"); // 6・7 で送るかどうか・文面（試せるように別ファイル）
 
 initializeApp();
 const db = getFirestore();
@@ -191,5 +194,17 @@ exports.pushTestCreated = onDocumentCreated("pushTests/{id}", async e => {
     }
     logger.warn(`テスト通知を送れませんでした（${name}）`, code, err && err.message);
     return done({ ok: false, code });
+  }
+});
+
+/* ---------- 6・7. 車検の希望日（トラストワン → 会社）・預けられる日が決まった（会社 → トラストワン） ---------- */
+// 車の記録が書きかわるたびに呼ばれる。送るかどうかは notices.js（希望日・預けられる日が変わったときだけ）
+exports.vehicleUpdated = onDocumentUpdated("vehicles/{id}", async e => {
+  const notes = vehicleNotices(e.data.before.data(), e.data.after.data());
+  if (!notes.length) return;
+  const aud = await loadAudience();
+  const at = e.data.after.updateTime.toMillis(); // 書きかえごとのキー（変えるたびに届く。同じ書きかえで2回は届かない）
+  for (const n of notes) {
+    await notify(aud, `${n.type}_${e.params.id}_${at}`, aud.names(n.type), { title: n.title, body: n.body }, { type: n.type, vehicleId: e.params.id });
   }
 });
