@@ -264,6 +264,10 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:3px solid v
 .pc .li .t .tag{vertical-align:1px}
 .pc .rpanel .li{align-items:flex-start}
 .pc .rpanel .li .t{white-space:normal;overflow:visible}
+/* せまいときは、ボタンを説明の下に回す（説明が1文字ずつの縦長にならないように） */
+.pc .rpanel .li{flex-wrap:wrap}
+.pc .rpanel .li .grow{min-width:150px}
+.pc .rpanel .rbtns{margin-left:auto}
 
 /* ---- 段階5: 車検一覧・設定 ---- */
 .li.tap{cursor:pointer}
@@ -534,6 +538,10 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
 .me-ver{padding:6px 16px 8px;border-top:1px solid var(--line);font-size:11px;color:var(--mute);text-align:right}
 /* ---- トラストワン（整備工場） ---- */
 .insnote.shopnote,.s.shopnote{color:var(--steel-t);font-weight:700}
+/* PC：車の修正画面の上の「車検中・修理中」と、間違えたとき用の取り消しボタン */
+.undo-box{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;border-radius:12px;padding:10px 14px;margin-bottom:14px;font-size:14px;background:var(--insp-bg);color:var(--insp-t)}
+.undo-box.fix{background:var(--fix-bg);color:var(--fix-t)}
+.undo-box .grow{flex:1;min-width:180px;overflow-wrap:anywhere}
 .pc .li:has(> .avail){flex-wrap:wrap;row-gap:4px}
 .avail{flex-basis:100%;display:flex;align-items:center;justify-content:flex-end;gap:6px;font-size:12px;color:var(--mute);cursor:default}
 .avail span{white-space:nowrap}

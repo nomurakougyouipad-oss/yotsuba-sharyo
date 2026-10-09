@@ -226,6 +226,7 @@ function takeFix(r) {
     updateDoc(doc(db, "repairs", r.id), {
       status: "in_repair", inRepairAt: serverTimestamp(), updatedAt: serverTimestamp(),
       shop: { from: x.d1, until: x.d2, by: operator(), shop: SHOP },
+      prev: { status: r.status, currentLot: v.currentLot || null }, // 預かる前の状態（会社のPCの「修理中を取り消す」で戻す）
     }).catch(fail("記録できませんでした。もう一度お試しください"));
     toast("預かり中にしました。会社のアプリにも出ます");
     return "";
@@ -274,6 +275,7 @@ function takeInsp(v) {
       vehicleId: v.id, outDate: x.d1, expectedBack: x.d2, backDate: null,
       oldShakenDate: v.shakenDate, newShakenDate: null, outBy: operator(), backBy: null, returnedLot: null, shop: SHOP,
       outAt: serverTimestamp(), backAt: null,
+      prev: { currentLot: v.currentLot || null, availDate: v.availDate || null }, // 預かる前の状態（会社のPCの「車検を取り消す」で戻す）
     });
     b.update(doc(db, "vehicles", v.id), { inspection: { id: rec.id, from: x.d1, until: x.d2 }, availDate: null, updatedAt: serverTimestamp() });
     b.commit().catch(fail("記録できませんでした。もう一度お試しください"));

@@ -35,7 +35,7 @@ const db = initializeFirestore(fbApp, { localCache: persistentLocalCache({ tabMa
 const storage = getStorage(fbApp);
 
 /* ---------- 定数 ---------- */
-const APP_VERSION = "22"; // 版の番号（名前のメニューの下に出す）。sw.js の CACHE（sharyo-v○○）と同じ番号にする
+const APP_VERSION = "23"; // 版の番号（名前のメニューの下に出す）。sw.js の CACHE（sharyo-v○○）と同じ番号にする
 const TYPES = ["トラック", "バン", "普通車"];
 const SHOP_NAME = "トラストワン"; // 整備工場（子会社）の名前。専用ページは shop.html
 const LABEL = { free: "空き", use: "使用中", fix: "修理中", own: "専用", insp: "車検中" };
@@ -1183,7 +1183,8 @@ async function doRepair(v) {
 function setRepairStatus(id, st) {
   const r = S.repairs.find(x => x.id === id); if (!r) return;
   const data = { status: st, updatedAt: serverTimestamp() };
-  if (st === "in_repair") data.inRepairAt = serverTimestamp();
+  // 修理中にする前の状態を残す（間違えたときに「修理中を取り消す」で戻す）
+  if (st === "in_repair") { data.inRepairAt = serverTimestamp(); data.prev = { status: r.status, currentLot: (byId(r.vehicleId) || {}).currentLot || null }; }
   if (st === "done") data.doneAt = serverTimestamp();
   updateDoc(doc(db, "repairs", id), data).catch(e => { console.error(e); toast("変更できませんでした。もう一度お試しください"); });
   toast(st === "in_repair" ? "修理中にしました" : (r.status === "in_repair" ? "修理完了にしました" : "対応済みにしました"));
@@ -1443,7 +1444,8 @@ function repairPanel() {
     ${list.length ? f.shown.map(r => {
       const photos = r.photos || [];
       const btns = r.status === "in_repair"
-        ? `<button class="btn free small" data-act="repairSet" data-id="${r.id}" data-val="done">修理完了（空きに戻す）</button>`
+        ? `<button class="btn free small" data-act="repairSet" data-id="${r.id}" data-val="done">修理完了（空きに戻す）</button>
+           <button class="btn ghost small" data-act="repairUndo" data-id="${r.id}">修理中を取り消す（間違えたとき）</button>`
         : `<button class="btn ghost small" data-act="repairSet" data-id="${r.id}" data-val="done">対応済みにする</button>
            <button class="btn danger small" data-act="repairSet" data-id="${r.id}" data-val="in_repair">修理中にする</button>`;
       return `<div class="li"><div class="grow">
@@ -1472,6 +1474,7 @@ function openModal(id) {
         ${v ? plateHtml(v) : ""}
         <label class="photo-btn">📷 ${v && v.photoUrl ? "写真を変える" : "写真を登録"}<input type="file" accept="image/*,.heic,.heif" hidden id="f-photo"></label>
       </div>
+      ${v ? undoBox(v) : ""}
       <p class="ferr" id="ferr" hidden></p>
       <div class="field"><label>ナンバー</label>
         <div class="plate-in">
@@ -1507,6 +1510,14 @@ function openModal(id) {
   $("modal").hidden = false;
   loadImages($("modal"));
   $("vform").plateArea.focus();
+}
+// 車検中・修理中の車：間違えたとき用の取り消しボタン（車検から戻ったとき・修理が終わったときは使わない）
+function undoBox(v) {
+  const rs = repairsOf(v);
+  return (v.inspection ? `<div class="undo-box insp"><div class="grow"><b>車検中</b>　${inspText(v.inspection)}</div>
+      <button type="button" class="btn ghost small" data-act="inspUndo" data-id="${v.id}">車検を取り消す（間違えたとき）</button></div>` : "")
+    + (rs.length ? `<div class="undo-box fix"><div class="grow"><b>修理中</b>　${rs.map(r => esc(repairText(r) || "修理依頼") + (r.shop ? `（${shopText(r)}）` : "")).join("／")}</div>
+      <button type="button" class="btn ghost small" data-act="repairUndoCar" data-id="${v.id}">修理中を取り消す（間違えたとき）</button></div>` : "");
 }
 // フォームの上の大きい写真。url があれば押すと画面いっぱいに開く。なければ車のイラスト
 function formPhotoHtml(url, v) {
@@ -1858,6 +1869,7 @@ function saveInspOut(f) {
     vehicleId: v.id, outDate: from, expectedBack: until, backDate: null,
     oldShakenDate: v.shakenDate, newShakenDate: null, outBy: operator(), backBy: null, returnedLot: null,
     outAt: serverTimestamp(), backAt: null,
+    prev: { currentLot: v.currentLot || null, availDate: v.availDate || null }, // 車検に出す前の状態（間違えたときに「車検を取り消す」で戻す）
   });
   b.update(doc(db, "vehicles", v.id), { inspection: { id: rec.id, from, until }, availDate: null, updatedAt: serverTimestamp() });
   b.commit().catch(e => { console.error(e); toast("車検に出せませんでした。もう一度お試しください", "err"); });
@@ -1904,6 +1916,53 @@ function saveInspBack(f) {
   b.commit().catch(e => { console.error(e); toast("戻せませんでした。もう一度お試しください", "err"); });
   closeModal();
   toast(`車検から戻しました（次の満了日 ${fmt(date)}）`);
+}
+
+/* ---------- 間違えて車検中・修理中にしたときの取り消し（PCのみ） ---------- */
+// 車検中・修理中にしたときに残した前の状態（置き場所・預けられる日・修理依頼の状態）に戻す
+// 記録は消さない（車検の記録は canceled、修理依頼は inRepairCanceled に、だれがいつ取り消したかを残す）
+// 前の状態がない古い記録（版22まで）は、車検中・修理中の印だけを外す
+const carName = v => `${v.kind}（${v.plateKana} ${v.plateNum}）`;
+async function undoInsp(id) {
+  const v = byId(id); if (!v || !v.inspection) return;
+  const x = v.inspection;
+  let rec = null;
+  if (x.id) {
+    try { const s = await getDocFromServer(doc(db, "inspections", x.id)); rec = s.exists() ? s.data() : null; }
+    catch (e) { console.error(e); toast("取り消せませんでした。電波のよい所でもう一度お試しください", "err"); return; }
+  }
+  const prev = rec && rec.prev, lot = prev && prev.currentLot && prev.currentLot !== v.currentLot ? prev.currentLot : null;
+  if (!confirm(`本当に取り消しますか？\n\n「${carName(v)}」の「車検中」${inspText(x)}を取り消して、車検に出す前の状態に戻します。\n・置き場所：${lot ? `${v.currentLot || "—"} → ${lot}` : `${lotOf(v) || "—"}（そのまま）`}\n・車検の満了日：${jp(v.shakenDate)}（変わりません）\n・車検の記録は消さずに「取り消し」として残ります\n\n車検から戻ってきたときは、これではなく「車検から戻す」を押してください。`)) return;
+  const now = byId(id); if (!now || !now.inspection || now.inspection.id !== x.id) { closeModal(); return; } // 確かめている間にほかの所で変わった
+  const data = { inspection: null, updatedAt: serverTimestamp() };
+  if (prev) data.availDate = prev.availDate || null;
+  if (lot) data.currentLot = lot;
+  const b = writeBatch(db);
+  b.update(doc(db, "vehicles", v.id), data);
+  if (rec) b.set(doc(db, "inspections", x.id), { canceled: true, canceledAt: serverTimestamp(), canceledBy: operator() }, { merge: true });
+  b.commit().catch(e => { console.error(e); toast("取り消せませんでした。もう一度お試しください", "err"); });
+  closeModal();
+  toast("車検中を取り消しました");
+}
+// rs：同じ車の「修理中」の修理依頼（修理依頼の欄からは1件、車の画面からはその車の全部）
+function undoRepair(rs) {
+  rs = rs.filter(r => r && r.status === "in_repair"); if (!rs.length) return;
+  const v = byId(rs[0].vehicleId);
+  const p = rs.map(r => r.prev).find(x => x && x.currentLot) || {};
+  const lot = v && p.currentLot && p.currentLot !== v.currentLot ? p.currentLot : null;
+  const what = rs.map(r => `・${repairText(r) || "修理依頼"}${r.shop ? `（${shopText(r)}）` : ""}`).join("\n");
+  if (!confirm(`本当に取り消しますか？\n\n「${v ? carName(v) : "この車"}」の「修理中」を取り消して、修理中にする前の状態（未対応の修理依頼）に戻します。\n${what}\n・置き場所：${lot ? `${v.currentLot || "—"} → ${lot}` : `${v ? lotOf(v) || "—" : "—"}（そのまま）`}\n・修理依頼の記録は消えません\n\n修理が終わったときは、これではなく「修理完了」を押してください。`)) return;
+  const b = writeBatch(db);
+  rs.forEach(r => b.update(doc(db, "repairs", r.id), {
+    status: "open", // 修理中にできるのは未対応の依頼だけなので、前の状態は「未対応」
+    shop: null, prev: null, // トラストワンの「預かり中」からも消える
+    inRepairCanceled: { at: serverTimestamp(), by: operator(), shop: r.shop || null },
+    updatedAt: serverTimestamp(),
+  }));
+  if (lot) b.update(doc(db, "vehicles", v.id), { currentLot: lot, updatedAt: serverTimestamp() });
+  b.commit().catch(e => { console.error(e); toast("取り消せませんでした。もう一度お試しください", "err"); });
+  closeModal();
+  toast("修理中を取り消しました");
 }
 
 /* ---------- サンプル投入（試作と同じ8台。日付は今日を基準にずらす） ---------- */
@@ -2140,6 +2199,9 @@ document.addEventListener("click", e => {
     case "avail": break; // 預けられる日の欄（押しても車の修正画面を開かない）
     case "inspOut": openInspOut(id); break;
     case "inspBack": openInspBack(id); break;
+    case "inspUndo": undoInsp(id); break;
+    case "repairUndo": undoRepair([S.repairs.find(x => x.id === id)]); break;
+    case "repairUndoCar": { const v = byId(id); if (v) undoRepair(repairsOf(v)); break; }
     case "shkPlus": shakenPlus(val); break;
     case "hideCar": { const v = byId(modalId); if (v) setHidden(v.id, !v.hidden); break; }
     case "unhide": setHidden(id, false); break;
