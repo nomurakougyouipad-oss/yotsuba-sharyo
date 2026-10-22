@@ -35,7 +35,7 @@ const db = initializeFirestore(fbApp, { localCache: persistentLocalCache({ tabMa
 const storage = getStorage(fbApp);
 
 /* ---------- 定数 ---------- */
-const APP_VERSION = "26"; // 版の番号（名前のメニューの下に出す）。sw.js の CACHE（sharyo-v○○）と同じ番号にする
+const APP_VERSION = "27"; // 版の番号（名前のメニューの下に出す）。sw.js の CACHE（sharyo-v○○）と同じ番号にする
 const TYPES = ["トラック", "バン", "普通車"];
 const SHOP_NAME = "トラストワン"; // 整備工場（子会社）の名前。専用ページは shop.html
 const LABEL = { free: "空き", use: "使用中", fix: "修理中", own: "専用", insp: "車検中", wait: "予約（まだ出ていない）" };

@@ -835,3 +835,25 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
 .undo-box.wait{background:var(--wait-bg);color:var(--wait-t)}
 .undo-box.wait .btn.primary.startbtn{background:var(--wait)}
 .done .done-note{margin:-12px 0 24px;font-size:14px;font-weight:700;color:var(--wait-t)}
+/* ---- PC：画面の横幅いっぱい（左右の余白 24px）。上の3枚・全車両・空き表を同じ幅に（版27） ---- */
+.pc{max-width:none;margin:0 0 40px;padding:0 24px}
+.pc.pc-aki{padding:0 24px;margin-bottom:0}
+.pc.pc-aki .aki-head{padding:0}
+.aki.is-pc > :not(.a-board){margin-inline:0}
+.aki.is-pc .a-board{border:1.5px solid var(--line);border-radius:16px}
+/* 全車両の表：カードの幅に収める。入りきらないほど画面がせまいときだけ、カードの中で横に動かす */
+.grid2 > *{min-width:0}
+.panel.wide > .table th,.panel.wide > .table td{padding-left:10px;padding-right:10px}
+.panel.wide > .table td{white-space:normal}
+/* 1行のまま、幅をとらない列：写真・ナンバー・使っている人・車検 */
+.panel.wide > .table tr.vrow > td:nth-child(2),.panel.wide > .table tr.vrow > td:nth-child(3),
+.panel.wide > .table tr.vrow > td:nth-child(5),.panel.wide > .table tr.vrow > td:last-child{width:1%;white-space:nowrap}
+/* 状態：「予約（まだ出ていない）」は「予約」と「（まだ出ていない）」の2行に（言葉の途中では切らない） */
+.panel.wide > .table td.st{width:1%;min-width:7em;white-space:normal;word-break:keep-all}
+.panel.wide > .table tr.vrow.wait td.st{font-size:14px;min-width:9.6em}
+/* 車種：取りすぎないよう幅の目安を決めて、長い名前は折り返す */
+.panel.wide > .table td.kind{width:20%;min-width:9em}
+/* 現場・置き場所・鍵：長いときは列の中で折り返す */
+.panel.wide > .table tr.vrow > td:nth-child(6){min-width:8em}
+.panel.wide > .table tr.vrow > td:nth-child(7){min-width:7em}
+.panel.wide > .table .keyl{white-space:normal;overflow:visible}
