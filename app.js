@@ -35,15 +35,17 @@ const db = initializeFirestore(fbApp, { localCache: persistentLocalCache({ tabMa
 const storage = getStorage(fbApp);
 
 /* ---------- 定数 ---------- */
-const APP_VERSION = "24"; // 版の番号（名前のメニューの下に出す）。sw.js の CACHE（sharyo-v○○）と同じ番号にする
+const APP_VERSION = "25"; // 版の番号（名前のメニューの下に出す）。sw.js の CACHE（sharyo-v○○）と同じ番号にする
 const TYPES = ["トラック", "バン", "普通車"];
 const SHOP_NAME = "トラストワン"; // 整備工場（子会社）の名前。専用ページは shop.html
 const LABEL = { free: "空き", use: "使用中", fix: "修理中", own: "専用", insp: "車検中" };
 const DEFAULT_SETTINGS = {
   sites: ["東レ 定修", "太陽石油", "黒藤川発電所", "熊本 浄化センター", "松前工場 内作"],
   lots: ["本社", "松前工場", "伊予工場"],
+  keyPlaces: ["松前の事務所", "伊予の事務所"], // 鍵の置き場所（「車につけたまま」は別に、いつも最後に出る）
   shakenAlertDays: 30,
 };
+const KEY_IN_CAR = "車につけたまま"; // 鍵の置き場所のうち、いつも出すもの（オレンジで目立たせる）
 const CAR_COLORS = ["#dfe4ea", "#f3f3f3", "#cfd6de", "#f7f7f7", "#c9d1d9", "#eef1f4", "#e5e9ee", "#f0f0f0"];
 
 /* ---------- データ（Firestore から届いたもの） ---------- */
@@ -134,6 +136,25 @@ function status(v) { return v.inspection ? "insp" : fixRepair(v) ? "fix" : (curr
 function repairText(r) { const s = (r.symptoms || []).join("・"); return s && r.memo ? `${s}：${r.memo}` : (s || r.memo || ""); }
 const lotOf = v => v.currentLot || v.homeLot || "";
 const alertDays = () => Number(S.settings.shakenAlertDays) || 30;
+
+/* ---------- 鍵の場所（返却のときに記録。車の画面であとから変えられる） ---------- */
+const KEY_MAX = 4; // 鍵の置き場所は4ヶ所まで（空欄は使わない）。「車につけたまま」は別
+const keyPlaces = () => (S.settings.keyPlaces || []).filter(x => x && x !== KEY_IN_CAR).slice(0, KEY_MAX).concat(KEY_IN_CAR);
+// 今の鍵の場所：{ text, cls }。使用中は「〇〇さんが使用中」。車検中・トラストワン預かり中・まだ記録がない車は null
+function keyInfo(v, use, fix) {
+  if (v.inspection || (!use && fix && fix.shop)) return null;
+  if (use) return { text: `${use.who}さんが使用中`, cls: "use" };
+  const p = v.key && v.key.place;
+  return p ? { text: p, cls: p === KEY_IN_CAR ? "incar" : "" } : null;
+}
+// 「鍵：松前の事務所」の1行（車につけたままはオレンジ）
+const keyLine = (v, use, fix) => { const k = keyInfo(v, use, fix); return k ? `<span class="keyl ${k.cls}">鍵：${esc(k.text)}</span>` : ""; };
+// 鍵の場所の記録（だれが・いつ）。例「10/22 田中さん」
+const keyWhen = v => {
+  const k = v.key, d = k && k.at && k.at.toDate ? k.at.toDate() : null; if (!k) return "";
+  return [d ? `${d.getMonth() + 1}/${d.getDate()}` : "", k.by ? (/）$/.test(k.by) ? k.by : `${k.by}さん`) : ""].filter(Boolean).join(" "); // 「事務所（PC）」には「さん」を付けない
+};
+const keyData = place => ({ place, by: operator(), at: serverTimestamp() });
 
 /* ---------- 必要な免許・専用の車・一時的に隠す ---------- */
 const LICENSES = ["普通", "準中型5t", "準中型", "中型8t", "中型", "大型"];
@@ -429,7 +450,7 @@ function listCars() {
     <div class="band ${statusView(v, st, use).cls}"><span>${esc(statusView(v, st, use).label)}</span>${bandExtra(v, st, use)}</div>
     <div class="body">
       ${thumbHtml(v)}
-      <div class="meta"><div class="r1">${plateHtml(v, true)}${shakenTag(v)}</div><div class="kind">${esc(v.kind)}</div>${vehicleTags(v)}<div class="who">${useText(v, use, fix)}</div></div>
+      <div class="meta"><div class="r1">${plateHtml(v, true)}${shakenTag(v)}</div><div class="kind">${esc(v.kind)}</div>${vehicleTags(v)}<div class="who">${useText(v, use, fix)}</div>${keyLine(v, use, fix) ? `<div class="keyrow">${keyLine(v, use, fix)}</div>` : ""}</div>
     </div>
   </button>`;
   }).join("");
@@ -444,6 +465,7 @@ function detail(v) {
     use ? ["現場", esc(use.site)] : null,
     use ? ["いつまで", isOverdue(use) ? `<span class="warn">${fmt(use.to)} まで（返却予定を過ぎています）</span>` : `${fmt(use.to)} まで`] : null,
     !use && !insp && !(fix && fix.shop) ? ["置いてある場所", esc(lotOf(v))] : null, // トラストワン預かり中は出さない
+    keyRow(v, use, fix),
     fix ? ["修理", `<span class="warn">${esc(repairText(fix))}</span>${fix.shop ? `<div class="insnote shopnote">${shopText(fix)}</div>` : ""}`] : null,
     [insp ? "車検満了日" : "車検", `<span class="${shakenClass(v) ? "warn" : ""}">${jp(v.shakenDate)}（${shakenText(v)}）</span>`],
     v.owner ? ["専用", `${esc(v.owner)}さん専用`] : null,
@@ -461,6 +483,33 @@ function detail(v) {
     ${st === "use" && canReserve(v) ? `<button class="btn ghost" data-act="goto" data-val="reserve" data-id="${v.id}">この車を予約する</button>` : ""}</div>
   ${calendar(v)}
   ${resList(v)}`;
+}
+
+// 車の画面の「鍵」の行。使用中は「〇〇さんが使用中」、それ以外は「変える」で直せる（事務所の人が鍵を動かしたとき用）
+// 車検中・トラストワン預かり中は出さない
+function keyRow(v, use, fix) {
+  if (use) return ["鍵", `${esc(use.who)}さんが使用中`];
+  if (v.inspection || (fix && fix.shop)) return null;
+  const k = keyInfo(v, use, fix);
+  return ["鍵", `${k ? `<span class="keyv ${k.cls}">${esc(k.text)}</span>` : `<span class="keynone">まだ記録がありません</span>`}<button type="button" class="keybtn" data-act="keyEdit" data-id="${v.id}">${k ? "変える" : "記録する"}</button>`];
+}
+// 鍵の場所を選ぶ小さな画面（スマホの車の画面から）。押した瞬間に保存
+function openKeySheet(vid) {
+  const v = byId(vid); if (!v) return;
+  const now = v.key && v.key.place, when = keyWhen(v);
+  openSheet(`<h3>鍵はどこにありますか？</h3>${akiCarHead(v)}
+    ${now ? `<p class="keynow">いまの記録：<b class="${now === KEY_IN_CAR ? "incar" : ""}">${esc(now)}</b>${when ? `<small>（${esc(when)}）</small>` : ""}</p>` : `<p class="keynow">まだ記録がありません</p>`}
+    <div class="keyopts">${keyPlaces().map(k => `<button type="button" class="abtn keyopt${k === KEY_IN_CAR ? " incar" : ""}${k === now ? " on" : ""}" data-act="keySet" data-id="${v.id}" data-val="${esc(k)}"${k === now ? ' aria-current="true"' : ""}>${esc(k)}${k === now ? "（いまの記録）" : ""}</button>`).join("")}</div>`);
+  // 最初のボタンに枠が付くと選んであるように見えるので、「閉じる」に合わせておく
+  const c = $("aveil").querySelector('[data-act="akiClose"]'); if (c) c.focus({ preventScroll: true });
+}
+function setKey(vid, place) {
+  const v = byId(vid); if (!v || !place) return;
+  closeSheet();
+  if (v.key && v.key.place === place) return; // 同じ場所なら書きかえない
+  updateDoc(doc(db, "vehicles", v.id), { key: keyData(place), updatedAt: serverTimestamp() })
+    .catch(e => { console.error(e); toast("保存できませんでした。もう一度お試しください", "err"); });
+  toast(`鍵の場所を「${place}」にしました`);
 }
 
 // 今月のカレンダー（予約・使用中の日をオレンジ、今日を枠線）
@@ -1083,19 +1132,27 @@ function notifyScreen() {
 }
 
 /* ---------- 返却 ---------- */
+// 1. 駐車場を押す → 2. 鍵の置き場所を押した瞬間に返却完了
 function returnForm(v) {
+  const sc = ui.screen, rid = esc(sc.rid || "");
+  if (sc.lot) {
+    const ks = keyPlaces();
+    return `<p class="retlot">🅿 <b>${esc(sc.lot)}</b> に止めました</p>
+  <div class="sheet-title">鍵はどこに置きましたか？</div><p class="sub">${esc(v.kind)}　${esc(v.plateKana)} ${esc(v.plateNum)}</p>
+  <div class="opts${ks.length > 3 ? " compact" : ""}">${ks.map(k => `<button class="opt${k === KEY_IN_CAR ? " incar" : ""}" data-act="return" data-id="${v.id}" data-val="${esc(k)}" data-lot="${esc(sc.lot)}" data-rid="${rid}">${esc(k)}<span>›</span></button>`).join("")}</div>`;
+  }
   return `<div class="sheet-title">どこに止めましたか？</div><p class="sub">${esc(v.kind)}　${esc(v.plateKana)} ${esc(v.plateNum)}</p>
-  <div class="opts${(S.settings.lots || []).length > 3 ? " compact" : ""}">${(S.settings.lots || []).filter(Boolean).slice(0, LOT_MAX).map(l => `<button class="opt" data-act="return" data-id="${v.id}" data-val="${esc(l)}" data-rid="${esc(ui.screen.rid || "")}">${esc(l)}<span>›</span></button>`).join("")}</div>`;
+  <div class="opts${(S.settings.lots || []).length > 3 ? " compact" : ""}">${(S.settings.lots || []).filter(Boolean).slice(0, LOT_MAX).map(l => `<button class="opt" data-act="retLot" data-id="${v.id}" data-val="${esc(l)}" data-rid="${rid}">${esc(l)}<span>›</span></button>`).join("")}</div>`;
 }
-function doReturn(v, lot, rid) {
+function doReturn(v, lot, key, rid) {
   const use = rid ? S.reservations.find(r => r.id === rid && !r.returnedAt) : currentUse(v);
   if (!use) { toast("この車はもう返却されています"); go({ name: "detail", id: v.id }); return; }
   // 押した瞬間に返却完了（電波が悪くても、つながったときに送られる）
   const b = writeBatch(db);
-  b.update(doc(db, "reservations", use.id), { returnedAt: serverTimestamp(), returnedLot: lot });
-  b.update(doc(db, "vehicles", v.id), { currentLot: lot, updatedAt: serverTimestamp() });
+  b.update(doc(db, "reservations", use.id), { returnedAt: serverTimestamp(), returnedLot: lot, returnedKey: key });
+  b.update(doc(db, "vehicles", v.id), { currentLot: lot, key: keyData(key), updatedAt: serverTimestamp() });
   b.commit().catch(e => { console.error(e); toast("返却を記録できませんでした。もう一度お試しください"); });
-  go({ name: "done", title: "返却しました", msg: `${lot} に置いてある、と記録しました` });
+  go({ name: "done", title: "返却しました", msg: `${lot} に置いてある、と記録しました`, key });
 }
 
 /* ---------- 修理依頼 ---------- */
@@ -1196,6 +1253,7 @@ function setRepairStatus(id, st) {
 
 function doneScreen(sc) {
   return `<div class="done"><div class="ok">✓</div><h2>${esc(sc.title)}</h2><p>${esc(sc.msg)}</p>
+  ${sc.key ? `<p class="done-key"><span class="keyl ${sc.key === KEY_IN_CAR ? "incar" : ""}">鍵：${esc(sc.key)}</span></p>` : ""}
   ${ui.tab === "aki" ? `<button class="btn primary" data-act="tab" data-val="aki">空き表へ戻る</button>` : `<button class="btn primary" data-act="tab" data-val="cars">車両一覧へ戻る</button>`}</div>`;
 }
 
@@ -1252,7 +1310,7 @@ function renderPc() {
       `<button class="chip ${pcUi.filter === k ? "on" : ""}" data-act="pcFilter" data-val="${k}">${l}<span class="n">${n1(k)}</span></button>`).join("")}</div>
       <div class="chips types four">${[["all", "全種類"], ...TYPES.map(t => [t, t])].map(([k, l]) =>
       `<button class="chip ${pcUi.type === k ? "on" : ""}" data-act="pcType" data-val="${k}">${l}<span class="n">${n2(k)}</span></button>`).join("")}</div></div>`;
-    table = tabs + (!list.length ? `<div class="empty">この条件の車はありません</div>` : `<table class="table"><thead><tr><th>状態</th><th>写真</th><th>ナンバー</th><th>車種</th><th>使っている人</th><th>現場</th><th>置き場所</th><th>車検</th></tr></thead><tbody>
+    table = tabs + (!list.length ? `<div class="empty">この条件の車はありません</div>` : `<table class="table"><thead><tr><th>状態</th><th>写真</th><th>ナンバー</th><th>車種</th><th>使っている人</th><th>現場</th><th>置き場所・鍵</th><th>車検</th></tr></thead><tbody>
       ${["use", "free", "own", "fix", "insp"].map(g => {
         const rows = list.filter(v => groupOf(v) === g); if (!rows.length) return "";
         const open = !!pcUi.groups[g];
@@ -1262,7 +1320,7 @@ function renderPc() {
         <td class="st"><span class="dot ${g}"></span>${LABEL[g]}${over ? '<div><span class="tag overdue">返却待ち</span></div>' : ""}</td>
         <td>${thumbHtml(v, false, true)}</td><td>${plateHtml(v, true)}</td><td class="kind">${esc(v.kind)}${vehicleTags(v)}</td>
         <td>${use ? esc(use.who) : "—"}</td><td>${use ? `${esc(use.site)}<div class="s${over ? " overdue-s" : ""}" style="font-size:12px">${fmt(use.from)}〜${fmt(use.to)}${over ? "（返却予定を過ぎています）" : ""}</div>` : insp ? `車検<div class="s" style="font-size:12px">${inspText(v.inspection)}</div>` : (g === "fix" && fixRepair(v) && fixRepair(v).shop ? `<div class="s" style="font-size:12px">${shopText(fixRepair(v))}</div>` : "—")}</td>
-        <td>${use || insp ? "—" : esc(lotOf(v))}</td><td>${shakenDays(v, ' style="font-size:13px"')}</td></tr>`;
+        <td>${use || insp ? "—" : esc(lotOf(v))}${keyLine(v, use, fixRepair(v)) ? `<div class="keyrow">${keyLine(v, use, fixRepair(v))}</div>` : ""}</td><td>${shakenDays(v, ' style="font-size:13px"')}</td></tr>`;
         }).join(""));
       }).join("")}
       </tbody></table>`);
@@ -1517,6 +1575,7 @@ function openModal(id) {
         ${v && v.owner && !activeMembers().some(m => m.name === v.owner) ? `<option selected>${esc(v.owner)}</option>` : ""}</select></div>
       <div class="field"><label for="f-lot">置き場所</label><select id="f-lot" name="lot">
         ${lots.map(l => `<option${(v ? lotOf(v) === l : l === lots[0]) ? " selected" : ""}>${esc(l)}</option>`).join("")}</select></div>
+      ${keyField(v)}
     </div>
     <div class="mfoot">
       ${v ? `<button type="button" class="btn danger" data-act="retire">廃車にする</button><button type="button" class="btn ghost" data-act="hideCar">${v.hidden ? "表示に戻す" : "一時的に隠す"}</button>
@@ -1529,6 +1588,19 @@ function openModal(id) {
   $("modal").hidden = false;
   loadImages($("modal"));
   $("vform").plateArea.focus();
+}
+// PC の車の画面の「鍵の場所」。選び直して「保存する」で記録（事務所の人が鍵を動かしたとき用）
+// 使用中は使っている人を出すだけ。車検中・トラストワン預かり中は出さない
+function keyField(v) {
+  const use = v && !v.inspection ? currentUse(v) : null, fix = v ? fixRepair(v) : null;
+  if (use) return `<div class="field"><label>鍵の場所</label><div class="keyuse">${esc(use.who)}さんが使用中<span class="hint">（返却のときに記録されます）</span></div></div>`;
+  if (v && (v.inspection || (fix && fix.shop))) return "";
+  const now = v && v.key && v.key.place, ks = keyPlaces();
+  if (now && !ks.includes(now)) ks.unshift(now); // 設定から外した置き場所が記録に残っているとき
+  const when = v ? keyWhen(v) : "";
+  return `<div class="field"><label>鍵の場所</label><div class="seg keyseg">${ks.map(k =>
+    `<label class="chip${k === KEY_IN_CAR ? " incar" : ""}"><input type="radio" name="keyPlace" value="${esc(k)}"${k === now ? " checked" : ""}>${esc(k)}</label>`).join("")}</div>
+    <div class="hint">${now ? `いまの記録：${esc(now)}${when ? `（${esc(when)}）` : ""}。鍵を動かしたら選び直して「保存する」を押してください` : "まだ記録がありません。選んで「保存する」を押すと記録します（返却のときにも記録されます）"}</div></div>`;
 }
 // 車検中・修理中の車：間違えたとき用の取り消しボタン（車検から戻ったとき・修理が終わったときは使わない）
 function undoBox(v) {
@@ -1558,6 +1630,7 @@ function openSettings() {
   const st = S.settings;
   const lines = a => esc((a || []).join("\n"));
   const lots = [...(st.lots || [])].slice(0, LOT_MAX); while (lots.length < LOT_MAX) lots.push("");
+  const keys = keyPlaces().filter(k => k !== KEY_IN_CAR); while (keys.length < KEY_MAX) keys.push("");
   modalId = null;
   $("modal").innerHTML = `<div class="overlay"><form class="modal panel" id="sform" novalidate>
     <h2>設定<button type="button" class="x" data-act="close" aria-label="閉じる">×</button></h2>
@@ -1589,6 +1662,9 @@ function openSettings() {
       <div class="field"><label>駐車場（${LOT_MAX}ヶ所まで）</label>
         <div class="lots-in">${lots.map((l, i) => `<input name="lot${i}" value="${esc(l)}" aria-label="駐車場${i + 1}" maxlength="30" autocomplete="off">`).join("")}</div>
         <div class="hint">返却のときのボタンに、入っている駐車場だけが出ます（空欄は使いません。1ヶ所は必要）。名前を変えると、その駐車場にある車の置き場所も新しい名前になります</div></div>
+      <div class="field"><label>鍵の置き場所（${KEY_MAX}ヶ所まで）</label>
+        <div class="lots-in keys-in">${keys.map((k, i) => `<input name="key${i}" value="${esc(k)}" aria-label="鍵の置き場所${i + 1}" maxlength="30" autocomplete="off">`).join("")}<span class="key-fixed" title="いつも出ます（変えられません）">${KEY_IN_CAR}</span></div>
+        <div class="hint">返却のときの「鍵はどこに置きましたか？」のボタンに、入っている置き場所だけが出ます（空欄は使いません。1ヶ所は必要）。「${KEY_IN_CAR}」は、いつも最後に出ます。名前を変えると、そこに鍵がある車の記録も新しい名前になります</div></div>
       <div class="field"><label for="s-days">車検の通知（何日前から）</label>
         <div class="days-in"><input id="s-days" name="shakenAlertDays" type="number" inputmode="numeric" min="1" max="365" value="${esc(st.shakenAlertDays || 30)}"><span>日前から</span></div>
         <div class="hint">スマホの車両カードに「🔔 車検」が出始める日数です（はじめは30日）</div></div>
@@ -1742,10 +1818,15 @@ function saveSettings(form) {
   const sites = list("sites").map(x => x.slice(0, 100));
   const slots = Array.from({ length: LOT_MAX }, (_, i) => String(f.get(`lot${i}`) || "").trim()); // 欄ごとの値（空欄あり）
   const lots = slots.filter(Boolean);
+  const kslots = Array.from({ length: KEY_MAX }, (_, i) => String(f.get(`key${i}`) || "").trim()); // 鍵の置き場所（欄ごと）
+  const keyPlacesNew = kslots.filter(Boolean);
   const days = Number(toHalf(String(f.get("shakenAlertDays") || "")));
   let err = "";
   if (!lots.length) err = "駐車場を1ヶ所以上入れてください";
   else if (new Set(lots).size < lots.length) err = "同じ名前の駐車場があります";
+  else if (!keyPlacesNew.length) err = "鍵の置き場所を1ヶ所以上入れてください";
+  else if (keyPlacesNew.includes(KEY_IN_CAR)) err = `「${KEY_IN_CAR}」は、いつも出るので入れなくて大丈夫です`;
+  else if (new Set(keyPlacesNew).size < keyPlacesNew.length) err = "同じ名前の鍵の置き場所があります";
   else if (!Number.isInteger(days) || days < 1 || days > 365) err = "車検の通知は 1〜365 の数字で入れてください";
   if (err) { const e = $("ferr"); e.textContent = err; e.hidden = false; return; }
 
@@ -1761,13 +1842,18 @@ function saveSettings(form) {
 
 保存しますか？`)) return;
 
+  // 鍵の置き場所も同じ：同じ欄で名前が変わったら、そこに鍵がある車の記録も書きかえる
+  const kold = keyPlaces().filter(k => k !== KEY_IN_CAR);
+  const krenames = new Map(kold.map((o, i) => [o, kslots[i]]).filter(([o, n]) => o && n && o !== n && !keyPlacesNew.includes(o)));
+
   const b = writeBatch(db);
-  b.set(doc(db, "settings", "app"), { sites, lots, shakenAlertDays: days, updatedAt: serverTimestamp() }, { merge: true });
-  if (renames.size) {
+  b.set(doc(db, "settings", "app"), { sites, lots, keyPlaces: keyPlacesNew, shakenAlertDays: days, updatedAt: serverTimestamp() }, { merge: true });
+  if (renames.size || krenames.size) {
     S.vehicles.forEach(v => {
       const up = {};
       if (renames.has(v.homeLot)) up.homeLot = renames.get(v.homeLot);
       if (renames.has(v.currentLot)) up.currentLot = renames.get(v.currentLot);
+      if (v.key && krenames.has(v.key.place)) up["key.place"] = krenames.get(v.key.place);
       if (Object.keys(up).length) b.update(doc(db, "vehicles", v.id), { ...up, updatedAt: serverTimestamp() });
     });
   }
@@ -1801,6 +1887,10 @@ function saveVehicle(form) {
   }
   if (!err && $("f-prev") && $("f-prev").querySelector(".loading-thumb")) err = "写真を読み込んでいます。少し待ってから保存してください";
   if (err) { const e = $("ferr"); e.textContent = err; e.hidden = false; return; }
+
+  // 鍵の場所：選び直したときだけ記録する（だれが・いつも新しくなる）
+  const kp = g("keyPlace"), cur = modalId ? byId(modalId) : null;
+  if (kp && kp !== (cur && cur.key && cur.key.place)) data.key = keyData(kp);
 
   // 電波が悪くても画面はすぐ閉じる（Firestore が裏で送る）
   const ref = modalId ? doc(db, "vehicles", modalId) : doc(collection(db, "vehicles"));
@@ -1929,7 +2019,7 @@ function saveInspBack(f) {
   if (date <= v.shakenDate) return showFerr(`新しい車検満了日は、今の満了日（${jp(v.shakenDate)}）より後にしてください`);
   if (!lot) return showFerr("置き場所を選んでください");
   const b = writeBatch(db);
-  b.update(doc(db, "vehicles", v.id), { shakenDate: date, currentLot: lot, inspection: null, availDate: null, shopWish: null, updatedAt: serverTimestamp() });
+  b.update(doc(db, "vehicles", v.id), { shakenDate: date, currentLot: lot, inspection: null, availDate: null, shopWish: null, key: null, updatedAt: serverTimestamp() }); // 鍵の場所は前の記録が古くなるので消す（車の画面で記録し直す）
   if (v.inspection.id) b.set(doc(db, "inspections", v.inspection.id), {
     vehicleId: v.id, backDate: ymd(today()), newShakenDate: date, backBy: operator(), returnedLot: lot, backAt: serverTimestamp(),
   }, { merge: true });
@@ -2197,11 +2287,14 @@ document.addEventListener("click", e => {
     case "detDay": detPickDay(id, val); break; // 車の詳しい画面のカレンダー：空いている日
     case "detRes": { const r = S.reservations.find(x => x.id === val); if (r) akiShowBlock({ k: "use", r, late: isOverdue(r) }); break; }
     case "akiClose": closeSheet(); break;
+    case "keyEdit": openKeySheet(id); break;
+    case "keySet": setKey(id, val); break;
     case "akiReserve": hideSheet(); openReserve(id, val); break;
     case "akiDetail": hideSheet(); detMonth = 0; go({ name: "detail", id }); break;
     case "cancelRes": cancelReservation(id); break;
     case "detMonth": detMonth = Math.max(0, Math.min(12, detMonth + Number(val))); render(); break;
-    case "return": { const v = byId(id); if (v) doReturn(v, val, el.dataset.rid); break; }
+    case "retLot": go({ name: "return", id, rid: el.dataset.rid, lot: val, back: { name: "return", id, rid: el.dataset.rid, back: ui.screen.back } }); break; // 返却：駐車場を選んだ → 鍵の置き場所
+    case "return": { const v = byId(id); if (v) doReturn(v, el.dataset.lot, val, el.dataset.rid); break; }
     case "myReturn": go({ name: "return", id, rid: val }); break;
     case "sym": toggleSym(val); break;
     case "rmPhoto": removeRepairPhoto(Number(val)); break;

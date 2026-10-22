@@ -256,7 +256,7 @@ function doneFix(r) {
       status: "done", doneAt: serverTimestamp(), updatedAt: serverTimestamp(),
       shopDone: { date: iso(today()), memo: $("memo").value.trim(), lot, by: operator() },
     });
-    b.update(doc(db, "vehicles", v.id), { currentLot: lot, updatedAt: serverTimestamp() });
+    b.update(doc(db, "vehicles", v.id), { currentLot: lot, key: null, updatedAt: serverTimestamp() }); // 鍵の場所は前の記録が古くなるので消す（会社で記録し直す）
     b.commit().catch(fail("記録できませんでした。もう一度お試しください"));
     toast(`修理完了を記録しました（${lot}）`);
     return "";
@@ -311,7 +311,7 @@ function doneInsp(v) {
     if (nx <= cur.shakenDate) return "新しい満了日は、今の満了日より後の日にしてください";
     const lot = pickedLot(); if (!lot) return "戻した場所を選んでください";
     const b = writeBatch(db);
-    b.update(doc(db, "vehicles", v.id), { shakenDate: nx, currentLot: lot, inspection: null, availDate: null, shopWish: null, updatedAt: serverTimestamp() });
+    b.update(doc(db, "vehicles", v.id), { shakenDate: nx, currentLot: lot, inspection: null, availDate: null, shopWish: null, key: null, updatedAt: serverTimestamp() }); // 鍵の場所は前の記録が古くなるので消す（会社で記録し直す）
     if (cur.inspection.id) b.set(doc(db, "inspections", cur.inspection.id), {
       vehicleId: v.id, backDate: iso(today()), newShakenDate: nx, backBy: operator(), returnedLot: lot, backAt: serverTimestamp(),
     }, { merge: true });

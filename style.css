@@ -776,3 +776,33 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
 .tabs{z-index:10}
 /* PC：予約の小さな画面 */
 .rmodal.modal{width:min(520px,100%)}
+/* ---- 鍵の場所（返却のとき・車の画面・一覧・PCの表。版25） ----
+   「車につけたまま」は目立つオレンジ（.incar）。使用中・ふつうの置き場所は落ち着いた色 */
+.keyrow{margin-top:4px;min-width:0}
+.keyl{display:inline-block;max-width:100%;font-size:13px;font-weight:700;line-height:1.4;color:var(--mute);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle}
+.keyl.incar,.keyv.incar{background:var(--use-bg);color:var(--use-deep);border:1.5px solid var(--use);border-radius:7px;padding:1px 8px;font-weight:900}
+.keyv{display:inline-block}
+.keynone{color:var(--mute);font-weight:500}
+.keybtn{margin-left:8px;min-height:44px;padding:4px 12px;border-radius:10px;border:1.5px solid var(--steel-t);background:var(--paper);color:var(--steel-t);font-size:14px;font-weight:700;vertical-align:middle}
+/* 返却：選んだ駐車場の確認と、鍵の置き場所のボタン */
+.retlot{margin:0 0 12px;padding:10px 14px;border-radius:12px;background:var(--free-bg);color:var(--free-t);font-size:15px;overflow-wrap:anywhere}
+.opt.incar{border-color:var(--use);background:var(--use-bg);color:var(--use-deep)}
+.done .done-key{margin:-12px 0 24px}
+.done .keyl{font-size:16px;white-space:normal}
+/* 鍵の場所を変える小さな画面 */
+.keynow{font-size:15px}
+.keynow small{color:var(--mute);margin-left:4px}
+.keynow b.incar{color:var(--use-deep)}
+.keyopts{display:grid;gap:8px}
+.abtn.keyopt{background:var(--paper);border:1.5px solid var(--line-strong);color:var(--ink);font-weight:900}
+.abtn.keyopt.incar{border-color:var(--use);background:var(--use-bg);color:var(--use-deep)}
+.abtn.keyopt.on{box-shadow:inset 0 0 0 2px var(--steel-t)}
+/* PC：表の「置き場所・鍵」と、車の画面の鍵の場所 */
+.table td .keyrow{margin-top:3px}
+.table td .keyl{font-size:12px}
+.seg label.chip.incar{border-color:var(--use);color:var(--use-deep)}
+.seg label.chip.incar:has(input:checked){background:var(--steel);color:#fff;border-color:var(--steel)}
+.keyuse{font-weight:700}
+.keyuse .hint{display:inline;margin-left:6px;font-weight:500}
+/* 設定：鍵の置き場所の欄の最後に「車につけたまま」（変えられない） */
+.key-fixed{display:flex;align-items:center;justify-content:center;min-width:0;min-height:44px;padding:4px 6px;border:1.5px dashed var(--use);border-radius:8px;background:var(--use-bg);color:var(--use-deep);font-size:13px;font-weight:700;text-align:center;line-height:1.3}
