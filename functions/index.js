@@ -6,6 +6,9 @@
 // 5. テスト通知：スマホの「🔔 通知」画面の「テスト通知を送る」から（押した本人のその端末にだけ）
 // 6. 車検の希望日：トラストワンが整備のページで取りに行きたい日を入れた・変えたら、すぐ（会社の人へ）
 // 7. 預けられる日が決まった：会社がPCで預けられる日を入れた・変えたら、すぐ（トラストワンの人へ）
+// 8. 使い始めのお知らせ（版26）：予約の日の 8:30、まだ「使い始める」を押していなければ（予約した本人だけ）
+// 9. 使い始めなしで取り消し（版26）：予約の日の 9:00 までに押さなかった予約に取り消しの印を付けて（消さずに残す）、
+//    本人（8 がオンの人）と、PCで「使い始めなしの取り消し」をオンにした人へ
 //
 // 届く人 = PCの設定（settings/notify）でオン かつ 本人がスマホでオフにしていない（notifyPrefs）かつ 通知を許可した端末がある（pushTokens）
 // 同じ通知が2回届かないよう、notifyLog/{通知のキー} に送った人を残す
@@ -16,6 +19,7 @@ const { initializeApp } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
 const { vehicleNotices } = require("./notices"); // 6・7 で送るかどうか・文面（試せるように別ファイル）
+const { needsStart, shouldRemind, shouldCancel, remindMsg, cancelMsg, CANCEL_MARK } = require("./starts"); // 8・9（試せるように別ファイル）
 
 initializeApp();
 const db = getFirestore();
@@ -133,7 +137,7 @@ async function returnReminder(type, toDate, title) {
   ]);
   for (const r of snap.docs) {
     const x = r.data();
-    if (x.canceled || x.sample) continue;
+    if (x.canceled || x.sample || needsStart(x)) continue; // 使い始めていない予約（版26）には送らない
     const car = await db.doc(`vehicles/${x.vehicleId}`).get();
     if (!car.exists || car.get("retired")) continue;
     await notify(aud, `${type}_${r.id}`, aud.names(type, [x.who]), { title, body: carText(car.data()) },
@@ -206,5 +210,43 @@ exports.vehicleUpdated = onDocumentUpdated("vehicles/{id}", async e => {
   const at = e.data.after.updateTime.toMillis(); // 書きかえごとのキー（変えるたびに届く。同じ書きかえで2回は届かない）
   for (const n of notes) {
     await notify(aud, `${n.type}_${e.params.id}_${at}`, aud.names(n.type), { title: n.title, body: n.body }, { type: n.type, vehicleId: e.params.id });
+  }
+});
+
+/* ---------- 8. 使い始めのお知らせ（予約の日の 8:30。予約した本人だけ） ---------- */
+exports.startReminder = onSchedule({ schedule: "30 8 * * *", timeZone: TZ }, async () => {
+  const today = ymdJst(new Date());
+  const [snap, aud] = await Promise.all([db.collection("reservations").where("from", "==", today).get(), loadAudience()]);
+  for (const r of snap.docs) {
+    const x = r.data();
+    if (!shouldRemind(x, today)) continue;
+    const car = await db.doc(`vehicles/${x.vehicleId}`).get();
+    if (!car.exists || car.get("retired") || car.get("sample")) continue;
+    await notify(aud, `start_${r.id}`, aud.names("start", [x.who]), remindMsg(car.data()), { type: "start", reservationId: r.id });
+  }
+});
+
+/* ---------- 9. 使い始めなしで取り消し（予約の日の 9:00） ---------- */
+// 予約は消さずに canceled・noStart の印を付ける（アプリは取り消した予約を使わないので、車は空きに戻る）
+exports.startCheck = onSchedule({ schedule: "0 9 * * *", timeZone: TZ }, async () => {
+  const today = ymdJst(new Date());
+  const snap = await db.collection("reservations").where("needStart", "==", true).where("returnedAt", "==", null).get();
+  const list = snap.docs.filter(d => shouldCancel(d.data(), today));
+  if (!list.length) return;
+  const aud = await loadAudience();
+  for (const r of list) {
+    // 9:00 ちょうどに「使い始める」が押されても二重にならないよう、最新を読み直してから印を付ける
+    const x = await db.runTransaction(async tx => {
+      const s = await tx.get(r.ref);
+      if (!s.exists || !shouldCancel(s.data(), today)) return null;
+      tx.update(r.ref, { ...CANCEL_MARK, canceledAt: FieldValue.serverTimestamp() });
+      return s.data();
+    });
+    if (!x) continue;
+    const car = await db.doc(`vehicles/${x.vehicleId}`).get();
+    logger.info(`使い始めなしで取り消し：${x.who}さん ${x.from}〜${x.to} ${car.exists ? car.get("kind") : x.vehicleId}`);
+    if (!car.exists || car.get("retired") || car.get("sample")) continue;
+    const names = [...new Set([...aud.names("start", [x.who]), ...aud.names("nostart")])];
+    await notify(aud, `nostart_${r.id}`, names, cancelMsg(x, car.data()), { type: "nostart", reservationId: r.id });
   }
 });

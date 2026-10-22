@@ -35,10 +35,11 @@ const db = initializeFirestore(fbApp, { localCache: persistentLocalCache({ tabMa
 const storage = getStorage(fbApp);
 
 /* ---------- 定数 ---------- */
-const APP_VERSION = "25"; // 版の番号（名前のメニューの下に出す）。sw.js の CACHE（sharyo-v○○）と同じ番号にする
+const APP_VERSION = "26"; // 版の番号（名前のメニューの下に出す）。sw.js の CACHE（sharyo-v○○）と同じ番号にする
 const TYPES = ["トラック", "バン", "普通車"];
 const SHOP_NAME = "トラストワン"; // 整備工場（子会社）の名前。専用ページは shop.html
-const LABEL = { free: "空き", use: "使用中", fix: "修理中", own: "専用", insp: "車検中" };
+const LABEL = { free: "空き", use: "使用中", fix: "修理中", own: "専用", insp: "車検中", wait: "予約（まだ出ていない）" };
+const START_HOUR = 9; // 予約の日のこの時刻（9:00）までに「使い始める」を押さないと、サーバー（Functions）が予約を取り消す
 const DEFAULT_SETTINGS = {
   sites: ["東レ 定修", "太陽石油", "黒藤川発電所", "熊本 浄化センター", "松前工場 内作"],
   lots: ["本社", "松前工場", "伊予工場"],
@@ -118,21 +119,28 @@ function saveMe(n) {
 /* ---------- 車の状態（README「状態の決め方」） ---------- */
 const active = () => S.vehicles.filter(v => !v.retired);
 const byId = id => S.vehicles.find(v => v.id === id);
+// 「使い始める」（版26）：版26から入れた予約（needStart）は、予約の日になっても押すまでは使用中にしない
+// 版25までに入れた予約（needStart がない）は、今までどおり予約の日になったら使用中
+const needsStart = r => !!r && r.needStart === true && !r.startedAt;
+// 今「使い始める」を押せる予約：始まる日が今日まで・まだ押していない・返却も取り消しもしていない
+const waitingStart = r => needsStart(r) && !r.returnedAt && !r.canceled && r.from <= ymd(today());
+const waitRes = v => S.reservations.filter(r => r.vehicleId === v.id && waitingStart(r)).sort((a, b) => (a.from > b.from ? 1 : -1))[0] || null;
+const afterStartLimit = () => new Date().getHours() >= START_HOUR;
 function currentUse(v) {
   const t = ymd(today());
   // 返却予定を過ぎても返却していなければ使用中（返却待ち）。いちばん早く終わる予定のものを使う
-  return S.reservations.filter(r => r.vehicleId === v.id && !r.returnedAt && r.from <= t)
+  return S.reservations.filter(r => r.vehicleId === v.id && !r.returnedAt && r.from <= t && !needsStart(r))
     .sort((a, b) => (a.to > b.to ? 1 : a.to < b.to ? -1 : 0))[0] || null;
 }
-// 返却予定を過ぎて、まだ返却していない予約
-const isOverdue = r => !!r && !r.returnedAt && r.to < ymd(today());
+// 返却予定を過ぎて、まだ返却していない予約（使い始めていない予約は、遅れにしない）
+const isOverdue = r => !!r && !r.returnedAt && !needsStart(r) && r.to < ymd(today());
 function fixRepair(v) { return S.repairs.find(r => r.vehicleId === v.id && r.status === "in_repair") || null; }
 function nextRes(v) {
   const t = ymd(today());
   return S.reservations.filter(r => r.vehicleId === v.id && !r.returnedAt && r.from > t).sort((a, b) => (a.from > b.from ? 1 : -1))[0] || null;
 }
-// 優先順：車検中 → 修理中 → 使用中 → 空き（廃車は一覧に出さない）
-function status(v) { return v.inspection ? "insp" : fixRepair(v) ? "fix" : (currentUse(v) ? "use" : "free"); }
+// 優先順：車検中 → 修理中 → 使用中 → 予約（まだ出ていない） → 空き（廃車は一覧に出さない）
+function status(v) { return v.inspection ? "insp" : fixRepair(v) ? "fix" : currentUse(v) ? "use" : waitRes(v) ? "wait" : "free"; }
 function repairText(r) { const s = (r.symptoms || []).join("・"); return s && r.memo ? `${s}：${r.memo}` : (s || r.memo || ""); }
 const lotOf = v => v.currentLot || v.homeLot || "";
 const alertDays = () => Number(S.settings.shakenAlertDays) || 30;
@@ -229,6 +237,8 @@ function bandExtra(v, st, use) {
   if (st === "insp") return `<span class="period">${inspText(v.inspection)}</span>`;
   if (use && isOverdue(use)) return `<span class="period">返却予定を過ぎています</span>`;
   if (use) return `<span class="period">${fmt(use.from)}〜${fmt(use.to)}</span>`;
+  const w = st === "wait" && waitRes(v);
+  if (w) return `<span class="period">${rangeText(w)}</span>`;
   const next = nextRes(v);
   if (st !== "fix" && next) return `<span class="period"><small>次の予約</small>${fmt(next.from)}〜</span>`;
   return "";
@@ -238,6 +248,8 @@ const shopText = r => (r && r.shop ? `${esc(r.shop.shop || SHOP_NAME)}預かり 
 function useText(v, use, fix) {
   if (v.inspection) return "車検に出しています";
   if (!use && fix && fix.shop) return shopText(fix);
+  const w = !use && !fix && waitRes(v);
+  if (w) return `${esc(w.who)}さん → ${esc(w.site)}（まだ出ていない・${esc(lotOf(v))}）`;
   return use ? `${esc(use.who)}さん → ${esc(use.site)}` : (fix ? `修理待ち：${esc(repairText(fix))}` : `${esc(lotOf(v))} にあります`);
 }
 const errBar = () => (S.error ? `<div class="errbar">${esc(S.error)}</div>` : "");
@@ -345,7 +357,7 @@ function refresh() {
   const a = document.activeElement;
   const typing = a && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName) && !["file", "radio", "checkbox", "button", "submit"].includes(a.type);
   if (ui.view === "phone" && typing && $("ph-screen").contains(a)) return;
-  if (ui.view !== "phone" && typing && $("modal").contains(a)) return; // PC：予約の画面などで入力中
+  if (ui.view !== "phone" && typing && ui.pcRes && $("modal").contains(a)) return; // PC：予約の画面で入力中（ほかの画面は描き直さないので、うしろの表だけ新しくする）
   if (a && a.dataset && a.dataset.avail) return; // PC：預けられる日を選んでいる途中は描き直さない
   // データが届いて描き直しても、今のスクロール位置のまま（空き表は表の中の位置も）
   const sc = $("ph-screen"), top = sc.scrollTop, ak = akiScroller() && scrollPos();
@@ -459,11 +471,15 @@ function listCars() {
 function detail(v) {
   const st = status(v), fix = fixRepair(v), insp = st === "insp";
   const use = insp ? null : currentUse(v); // 車検中は、使っている人・置いてある場所を出さない
+  const w = st === "wait" ? waitRes(v) : null; // 今日の予約で、まだ「使い始める」を押していない
   const rows = [
     ["状態", `<span class="status-pill ${statusView(v, st, use).cls}">${esc(statusView(v, st, use).label)}</span>${insp ? `<div class="insnote">${inspText(v.inspection)}</div>` : ""}`],
     use ? ["使っている人", esc(use.who) + "さん"] : null,
     use ? ["現場", esc(use.site)] : null,
     use ? ["いつまで", isOverdue(use) ? `<span class="warn">${fmt(use.to)} まで（返却予定を過ぎています）</span>` : `${fmt(use.to)} まで`] : null,
+    w ? ["予約した人", esc(w.who) + "さん"] : null,
+    w ? ["現場", esc(w.site)] : null,
+    w ? ["いつまで", `${fmt(w.to)} まで`] : null,
     !use && !insp && !(fix && fix.shop) ? ["置いてある場所", esc(lotOf(v))] : null, // トラストワン預かり中は出さない
     keyRow(v, use, fix),
     fix ? ["修理", `<span class="warn">${esc(repairText(fix))}</span>${fix.shop ? `<div class="insnote shopnote">${shopText(fix)}</div>` : ""}`] : null,
@@ -475,12 +491,16 @@ function detail(v) {
     ? `<button class="btn primary" disabled>この車を予約する</button><p class="ownnote">車検中のため予約できません</p>`
     : st === "use"
     ? `<button class="btn primary" data-act="goto" data-val="return" data-id="${v.id}">返却する</button>`
+    : w
+    // ほかの人の予約でも、代わりに押せる（押した人の名前が残る）
+    ? `<div class="startbox"><p class="sb-note">${startNote(w)}</p>${startBtn(w)}${w.who !== ME ? `<p class="sb-sub">${esc(w.who)}さんの予約です。代わりに押すと、押した人（${esc(operator())}）の名前が残ります</p>` : ""}</div>`
+      + (canCancel(w) ? `<button class="btn ghost" data-act="cancelRes" data-id="${w.id}">この予約を取り消す（使わないとき）</button>` : "")
     : (st === "free" ? (canReserve(v) ? `<button class="btn primary" data-act="goto" data-val="reserve" data-id="${v.id}">この車を予約する</button>`
       : `<p class="ownnote">この車は${esc(v.owner)}さん専用です</p>`) : "");
   return `<div class="hero">${thumbHtml(v, true, true)}${plateHtml(v)}${vehicleTags(v)}${photoBtn(v)}</div>
   <div class="rows">${rows.map(([k, val]) => `<div class="row"><span class="k">${k}</span><span class="v">${val}</span></div>`).join("")}</div>
   <div class="actions">${actions}<button class="btn ghost" data-act="goto" data-val="repair" data-id="${v.id}">修理を頼む</button>
-    ${st === "use" && canReserve(v) ? `<button class="btn ghost" data-act="goto" data-val="reserve" data-id="${v.id}">この車を予約する</button>` : ""}</div>
+    ${(st === "use" || w) && canReserve(v) ? `<button class="btn ghost" data-act="goto" data-val="reserve" data-id="${v.id}">この車を予約する</button>` : ""}</div>
   ${calendar(v)}
   ${resList(v)}`;
 }
@@ -578,7 +598,7 @@ function akiBlocks(cars) {
   S.reservations.forEach(r => {
     const l = map.get(r.vehicleId); if (!l || r.returnedAt) return;
     const late = isOverdue(r);
-    l.push({ k: "use", from: r.from, to: late ? t : r.to, late, r });
+    l.push({ k: "use", from: r.from, to: late ? t : r.to, late, wait: waitingStart(r), r }); // wait：今日の予約で、まだ「使い始める」を押していない
   });
   cars.forEach(v => {
     const l = map.get(v.id), ib = inspBlock(v);
@@ -628,7 +648,7 @@ function akiHtml(pc) {
       const ix = akiList.push(b) - 1;
       const main = b.k === "use" ? b.r.who : b.k === "fix" ? "修理" : "車検";
       const sub = pc ? (b.k === "use" ? b.r.site : b.k === "fix" && b.rep.shop ? `${b.rep.shop.shop || SHOP_NAME}預かり` : "") : "";
-      t += `<button class="a-blk ${b.k}${b.late ? " late" : ""}${s < 0 ? " cont-l" : ""}${e >= N ? " cont-r" : ""}" style="grid-column:${Math.max(s, 0) + 1} / ${Math.min(e, N - 1) + 2}" data-act="akiBlk" data-val="${ix}"><span>${b.late ? `<i class="lt">遅れ</i>` : ""}${esc(main)}</span>${sub ? `<small>${esc(sub)}</small>` : ""}</button>`;
+      t += `<button class="a-blk ${b.k}${b.late ? " late" : ""}${b.wait ? " wait" : ""}${s < 0 ? " cont-l" : ""}${e >= N ? " cont-r" : ""}" style="grid-column:${Math.max(s, 0) + 1} / ${Math.min(e, N - 1) + 2}" data-act="akiBlk" data-val="${ix}"><span>${b.late ? `<i class="lt">遅れ</i>` : ""}${esc(main)}</span>${sub ? `<small>${esc(sub)}</small>` : ""}</button>`;
     });
     tracks.push(t + `</div>`);
   });
@@ -643,7 +663,7 @@ function akiHtml(pc) {
         <div class="aki-scroll a-v"><div class="a-vin"><div class="a-names">${names.join("")}</div><div class="a-h"><div class="a-rows">${tracks.join("")}</div></div></div></div>
       </div>`;
   const types = [["all", "全部"], ...TYPES.map(t => [t, t])];
-  const legend = `<div class="a-legend"><span><i class="use"></i>予約・使用中</span><span><i class="fix"></i>修理中</span><span><i class="insp"></i>車検中</span><span><i class="late"></i>赤いふち＝返却遅れ</span><span><i class="free"></i>空き</span></div>`;
+  const legend = `<div class="a-legend"><span><i class="use"></i>予約・使用中</span><span><i class="wait"></i>まだ出ていない（今日）</span><span><i class="fix"></i>修理中</span><span><i class="insp"></i>車検中</span><span><i class="late"></i>赤いふち＝返却遅れ</span><span><i class="free"></i>空き</span></div>`;
   // PC：種類のタブ（1行の細めの形）・期間・色の説明を1段にまとめる
   const top = pc
     ? `<div class="a-bar"><div class="a-ptabs">${types.map(([k, l]) =>
@@ -697,8 +717,10 @@ function akiShowBlock(b) {
   const t = ymd(today());
   if (b.k === "use") {
     const r = b.r, v = byId(r.vehicleId); if (!v) return;
-    openSheet(`<h3>${b.late ? "返却遅れ" : AKI_KIND.use}</h3>${akiCarHead(v)}<p><b>${dayLabel(r.from)} 〜 ${dayLabel(r.to)}</b></p>
-      ${b.late ? `<p class="a-late">返却予定日を過ぎていますが、まだ返されていません</p>` : ""}<p>${esc(r.who)}さん → ${esc(r.site)}</p>`);
+    const w = waitingStart(r); // まだ「使い始める」を押していない今日の予約：押せるボタンを出す（ほかの人の分も代わりに押せる）
+    openSheet(`<h3>${b.late ? "返却遅れ" : w ? LABEL.wait : AKI_KIND.use}</h3>${akiCarHead(v)}<p><b>${dayLabel(r.from)} 〜 ${dayLabel(r.to)}</b></p>
+      ${b.late ? `<p class="a-late">返却予定日を過ぎていますが、まだ返されていません</p>` : ""}<p>${esc(r.who)}さん → ${esc(r.site)}</p>
+      ${w ? `<p class="a-wait">${startNote(r)}</p>${startBtn(r, "abtn go wait")}` : ""}`);
   } else if (b.k === "fix") {
     const r = b.rep, v = byId(r.vehicleId); if (!v) return;
     const until = r.shop && r.shop.until;
@@ -727,7 +749,7 @@ function akiShowCar(vid) {
 const SITE_OTHER = "__other";
 const plateText = v => `${esc(v.plateArea)} ${esc(v.plateClass)} ${esc(v.plateKana)} ${esc(v.plateNum)}`;
 // 同じ車で日付が重なる予約（返却済みは除く）。返却予定を過ぎて返していない予約は今日まで（明日からは予約できる）
-const effTo = r => { const t = ymd(today()); return !r.returnedAt && r.to < t ? t : r.to; };
+const effTo = r => { const t = ymd(today()); return !r.returnedAt && !needsStart(r) && r.to < t ? t : r.to; };
 const findClash = (list, vid, from, to) => list.find(r => r.vehicleId === vid && !r.returnedAt && !r.canceled && r.from <= to && from <= effTo(r)) || null;
 const clashMsg = r => (effTo(r) !== r.to
   ? `この車は返却予定（${fmt(r.to)}）を過ぎて、まだ返却されていません（${r.who}さん）。今日は予約できません（明日からなら予約できます）`
@@ -751,8 +773,43 @@ const repairClash = (v, from, to) => repairsOf(v).map(repairBlock).some(b => fro
 const inspClash = (v, from, to) => { const b = inspBlock(v); return !!b && from <= b.to && b.from <= to; };
 const inspMsg = v => `この車は車検中です${v.inspection.until ? `（戻り予定 ${fmt(v.inspection.until)}）` : ""}。その日は予約できません`;
 const rangeText = r => (r.from === r.to ? fmt(r.from) : `${fmt(r.from)}〜${fmt(r.to)}`);
-// 取り消せるのは、まだ始まっていない予約。スマホは予約した本人（使う人か予約した人）、PC（広い画面）は全部
-const canCancel = r => r.from > ymd(today()) && (wide.matches || (!!ME && (r.who === ME || r.createdBy === ME)));
+// 取り消せるのは、まだ始まっていない予約（「使い始める」を押していない今日の予約も）。スマホは予約した本人（使う人か予約した人）、PC（広い画面）は全部
+const canCancel = r => (r.from > ymd(today()) || waitingStart(r)) && (wide.matches || (!!ME && (r.who === ME || r.createdBy === ME)));
+
+/* ---------- 使い始める（版26） ---------- */
+// 予約の日に押すと使用中になる（何日も続く予約は最初の日だけ）。ほかの人の予約でも、代わりに押せる（押した人を startedBy に残す）
+// 9:00 に Functions が取り消すのとぶつからないよう、サーバーの最新で「取り消されていない」を確かめてから記録する
+let starting = null; // 送っている予約のID
+async function startUse(rid) {
+  const r = S.reservations.find(x => x.id === rid);
+  if (!r || !waitingStart(r) || starting) return;
+  starting = rid; render();
+  // PC の車の画面（描き直さない画面）のボタンも「送っています…」に
+  const btns = () => document.querySelectorAll(`#modal [data-act="startUse"][data-val="${rid}"]`);
+  btns().forEach(b => { b.disabled = true; b.textContent = "送っています…"; });
+  let ok = false;
+  try {
+    await runTransaction(db, async tx => {
+      const ref = doc(db, "reservations", rid), s = await tx.get(ref), x = s.exists() ? s.data() : null;
+      if (!x || x.canceled) throw new ClashError(x && x.noStart ? "9時を過ぎたので、この予約は取り消されました" : "この予約は取り消されています");
+      if (x.returnedAt) throw new ClashError("この予約はもう返却されています");
+      if (x.startedAt) return; // ほかの人がもう押した
+      tx.update(ref, { startedAt: serverTimestamp(), startedBy: operator() });
+    });
+    const v = byId(r.vehicleId); ok = true;
+    toast(`使い始めました${v ? `（${v.kind}）` : ""}`);
+  } catch (e) {
+    console.error(e);
+    toast(e instanceof ClashError ? e.message : "記録できませんでした。電波のよい所でもう一度押してください", "err");
+  } finally {
+    starting = null; render();
+    btns().forEach(b => { const box = b.closest(".undo-box"); if (ok && box) box.remove(); else { b.disabled = false; b.textContent = "使い始める"; } });
+  }
+}
+// 「使い始める」のボタン（押している間は「送っています…」）
+const startBtn = (r, cls = "btn primary") => `<button type="button" class="${cls} startbtn" data-act="startUse" data-val="${r.id}"${starting ? " disabled" : ""}>${starting === r.id ? "送っています…" : "使い始める"}</button>`;
+// 9:00 までに押す、の説明（9:00 を過ぎたら「まもなく取り消されます」）
+const startNote = r => (r.from === ymd(today()) && !afterStartLimit() ? "9:00 までに「使い始める」を押してください。押さないと予約は取り消されます" : "「使い始める」を押していません。まもなく取り消されます");
 function cancelReservation(id) {
   const r = S.reservations.find(x => x.id === id); if (!r) return;
   if (!canCancel(r)) { toast("この予約は取り消せません"); return; }
@@ -762,6 +819,7 @@ function cancelReservation(id) {
   updateDoc(doc(db, "reservations", id), { canceled: true, canceledBy: ME || "事務所（PC）", canceledAt: serverTimestamp() })
     .catch(e => { console.error(e); toast("取り消せませんでした。もう一度お試しください", "err"); });
   toast("予約を取り消しました");
+  document.querySelectorAll(`#modal [data-act="cancelRes"][data-id="${id}"]`).forEach(b => { const box = b.closest(".undo-box"); if (box) box.remove(); }); // PC の車の画面
 }
 // この車で予約できない日（日付 → 理由）：ほかの予約・使用中（返却が遅れている予約は今日まで）・車検中・修理中。今日より前は見ない
 function blockedDays(v) {
@@ -924,7 +982,11 @@ async function doReserve(v) {
       for (const g of ranges) { const c = findClash(list, v.id, g.from, g.to); if (c) throw new ClashError(clashMsg(c)); }
       tx.update(vref, { resSeq: increment(1), updatedAt: serverTimestamp() });
       // 続いている日ごとに1つの予約。全部まとめて登録する（途中で1つだけ入ることはない）
-      ranges.forEach(g => tx.set(doc(collection(db, "reservations")), { ...base, from: g.from, to: g.to, createdAt: serverTimestamp() }));
+      // 版26から：予約の日に「使い始める」を押すまでは使用中にしない（needStart）。ただし 9:00 より後に入れた今日の予約は、そのまま使用中（startAuto）
+      ranges.forEach(g => tx.set(doc(collection(db, "reservations")), {
+        ...base, from: g.from, to: g.to, createdAt: serverTimestamp(), needStart: true,
+        ...(g.from === t && afterStartLimit() ? { startedAt: serverTimestamp(), startedBy: operator(), startAuto: true } : {}),
+      }));
     });
   } catch (e) {
     console.error(e);
@@ -935,7 +997,10 @@ async function doReserve(v) {
   }
   resetForm();
   const msg = `${ranges.map(rangeText).join("、")}　${who}さん　${site}`;
-  if (ui.view === "phone") go({ name: "done", title: "予約しました", msg });
+  // 使い始めの説明：9:00 より後に入れた今日の分はそのまま使用中、ほかは予約の日の 9:00 までに「使い始める」
+  const auto = ranges.filter(g => g.from === t && afterStartLimit()).length, rest = ranges.length - auto;
+  const note = [auto ? "今日の分は、そのまま「使用中」にしました。" : "", rest ? `${auto ? "ほかの日は、" : ""}予約の日の 9:00 までに「使い始める」を押してください（押さないと予約は取り消されます）` : ""].join("");
+  if (ui.view === "phone") go({ name: "done", title: "予約しました", msg, note });
   else { closeModal(); render(); toast(`予約しました：${msg}`); }
 }
 
@@ -944,16 +1009,27 @@ const dayLabel = s => { const d = parse(s); return `${d.getMonth() + 1}/${d.getD
 // 自分の予約のうち、始まっていて返却していないもの（返却予定を過ぎたものも含む）
 function myUses() {
   const t = ymd(today());
-  return S.reservations.filter(r => r.who === ME && !r.returnedAt && r.from <= t && byId(r.vehicleId) && !byId(r.vehicleId).retired)
+  return S.reservations.filter(r => r.who === ME && !r.returnedAt && r.from <= t && !needsStart(r) && byId(r.vehicleId) && !byId(r.vehicleId).retired)
     .sort((a, b) => (a.to > b.to ? 1 : a.to < b.to ? -1 : 0));
 }
+// 自分の予約（使う人か、予約した人）で、今日「使い始める」を押せるもの
+const myWaits = () => S.reservations.filter(r => (r.who === ME || r.createdBy === ME) && waitingStart(r) && byId(r.vehicleId) && !byId(r.vehicleId).retired && !byId(r.vehicleId).hidden)
+  .sort((a, b) => (a.from > b.from ? 1 : -1));
 function myBar() {
   if (!ME || !S.ready) return "";
-  const uses = myUses(); if (!uses.length) return "";
+  const uses = myUses(), waits = myWaits(); if (!uses.length && !waits.length) return "";
   const t = ymd(today());
   const next = S.reservations.filter(r => r.who === ME && !r.returnedAt && r.from > t && byId(r.vehicleId) && !byId(r.vehicleId).retired)
     .sort((a, b) => (a.from > b.from ? 1 : a.from < b.from ? -1 : 0))[0];
-  return `<div class="mybar">${uses.map(r => {
+  // いちばん上：今日の予約で、まだ「使い始める」を押していないもの
+  return `<div class="mybar">${waits.map(r => {
+    const v = byId(r.vehicleId);
+    return `<div class="mywait">
+      <div class="mw-head">今日の予約（まだ出ていない）${r.who !== ME ? `　${esc(r.who)}さんの分` : ""}</div>
+      <div class="mu-body"><div class="mu-info"><b>${esc(v.kind)}</b><span class="mu-plate">${plateText(v)}</span><span class="mu-to">${r.from === r.to ? dayLabel(r.to) : `${dayLabel(r.from)}〜${dayLabel(r.to)}`}　${esc(r.site)}</span></div>
+        ${startBtn(r, "mw-btn")}</div>
+      <div class="mw-note">${startNote(r)}</div></div>`;
+  }).join("")}${uses.map(r => {
     const v = byId(r.vehicleId), over = r.to < t;
     return `<div class="myuse${over ? " over" : ""}">
       <div class="mu-head">${over ? "⚠ 返却予定を過ぎています" : "あなたが使用中の車"}</div>
@@ -971,6 +1047,9 @@ const NTYPES = [
   ["repair", "修理依頼", () => "すぐ", "修理依頼が来た", "all"],
   ["wish", "車検の希望日", () => "トラストワンが入れたらすぐ", "トラストワンから車検の希望日が来た", "staff"],
   ["avail", "預けられる日が決まった", () => "会社が入れたらすぐ", "預けられる日が決まった", "shop"],
+  // 使い始め（版26）：start は予約した本人へ（8:30 のお知らせと、9:00 に取り消された知らせ）。nostart は全員の分の取り消しを知りたい人（社長・事務所など）へ
+  ["start", "使い始めのお知らせ", () => "8:30（本人だけ）。取り消しも本人に", "今日の予約で「使い始める」を押していない（8:30）・取り消された（9:00）", "staff"],
+  ["nostart", "使い始めなしの取り消し", () => "9:00（全員の分）", "だれかの予約が、使い始めなしで取り消された（9:00）", "staff"],
 ];
 const STAFF_TYPES = NTYPES.filter(t => t[4] !== "shop").map(t => t[0]);
 const SHOP_TYPES = NTYPES.filter(t => t[4] !== "staff").map(t => t[0]);
@@ -1254,13 +1333,14 @@ function setRepairStatus(id, st) {
 function doneScreen(sc) {
   return `<div class="done"><div class="ok">✓</div><h2>${esc(sc.title)}</h2><p>${esc(sc.msg)}</p>
   ${sc.key ? `<p class="done-key"><span class="keyl ${sc.key === KEY_IN_CAR ? "incar" : ""}">鍵：${esc(sc.key)}</span></p>` : ""}
+  ${sc.note ? `<p class="done-note">${esc(sc.note)}</p>` : ""}
   ${ui.tab === "aki" ? `<button class="btn primary" data-act="tab" data-val="aki">空き表へ戻る</button>` : `<button class="btn primary" data-act="tab" data-val="cars">車両一覧へ戻る</button>`}</div>`;
 }
 
 /* ================= PC版ダッシュボード ================= */
 /* ---------- PC の表示の状態（絞り込み・グループの開閉・パネルの開閉。開き直しても覚えておく） ---------- */
 const pcUi = (() => {
-  const def = { page: "dash", filter: "all", type: "all", groups: { use: true, free: false, own: false, fix: true, insp: true }, panels: { shaken: false, repair: false, future: false } };
+  const def = { page: "dash", filter: "all", type: "all", groups: { use: true, wait: true, free: false, own: false, fix: true, insp: true }, panels: { shaken: false, repair: false, future: false } };
   let p = {}; try { p = JSON.parse(lsGet("sharyo_pc_ui") || "{}") || {}; } catch (e) { p = {}; }
   return { page: p.page === "aki" ? "aki" : def.page, filter: p.filter || def.filter, type: p.type || def.type, groups: { ...def.groups, ...(p.groups || {}) }, panels: { ...def.panels, ...(p.panels || {}) } };
 })();
@@ -1311,15 +1391,15 @@ function renderPc() {
       <div class="chips types four">${[["all", "全種類"], ...TYPES.map(t => [t, t])].map(([k, l]) =>
       `<button class="chip ${pcUi.type === k ? "on" : ""}" data-act="pcType" data-val="${k}">${l}<span class="n">${n2(k)}</span></button>`).join("")}</div></div>`;
     table = tabs + (!list.length ? `<div class="empty">この条件の車はありません</div>` : `<table class="table"><thead><tr><th>状態</th><th>写真</th><th>ナンバー</th><th>車種</th><th>使っている人</th><th>現場</th><th>置き場所・鍵</th><th>車検</th></tr></thead><tbody>
-      ${["use", "free", "own", "fix", "insp"].map(g => {
+      ${["use", "wait", "free", "own", "fix", "insp"].map(g => {
         const rows = list.filter(v => groupOf(v) === g); if (!rows.length) return "";
         const open = !!pcUi.groups[g];
         return `<tr class="grp ${g}${open ? "" : " closed"}" data-act="pcGroup" data-val="${g}" tabindex="0" role="button" aria-expanded="${open}" title="押すと${open ? "閉じます" : "開きます"}"><td colspan="8"><span class="caret">${open ? "▼" : "▶"}</span>${LABEL[g]}<span>${rows.length}台</span>${g === "use" && rows.some(v => isOverdue(currentUse(v))) ? `<span class="tag overdue">うち返却待ち ${rows.filter(v => isOverdue(currentUse(v))).length}台</span>` : ""}</td></tr>` + (!open ? "" : rows.map(v => {
-          const insp = g === "insp", use = insp ? null : currentUse(v), over = isOverdue(use);
+          const insp = g === "insp", use = insp ? null : currentUse(v), over = isOverdue(use), w = g === "wait" ? waitRes(v) : null;
           return `<tr class="vrow ${g}${over ? " over" : ""}" data-act="edit" data-id="${v.id}" title="押すと修正できます">
         <td class="st"><span class="dot ${g}"></span>${LABEL[g]}${over ? '<div><span class="tag overdue">返却待ち</span></div>' : ""}</td>
         <td>${thumbHtml(v, false, true)}</td><td>${plateHtml(v, true)}</td><td class="kind">${esc(v.kind)}${vehicleTags(v)}</td>
-        <td>${use ? esc(use.who) : "—"}</td><td>${use ? `${esc(use.site)}<div class="s${over ? " overdue-s" : ""}" style="font-size:12px">${fmt(use.from)}〜${fmt(use.to)}${over ? "（返却予定を過ぎています）" : ""}</div>` : insp ? `車検<div class="s" style="font-size:12px">${inspText(v.inspection)}</div>` : (g === "fix" && fixRepair(v) && fixRepair(v).shop ? `<div class="s" style="font-size:12px">${shopText(fixRepair(v))}</div>` : "—")}</td>
+        <td>${use ? esc(use.who) : w ? esc(w.who) : "—"}</td><td>${w ? `${esc(w.site)}<div class="s" style="font-size:12px">${fmt(w.from)}〜${fmt(w.to)}</div><div class="s waitnote" style="font-size:12px">「使い始める」を押していません</div>` : use ? `${esc(use.site)}<div class="s${over ? " overdue-s" : ""}" style="font-size:12px">${fmt(use.from)}〜${fmt(use.to)}${over ? "（返却予定を過ぎています）" : ""}</div>` : insp ? `車検<div class="s" style="font-size:12px">${inspText(v.inspection)}</div>` : (g === "fix" && fixRepair(v) && fixRepair(v).shop ? `<div class="s" style="font-size:12px">${shopText(fixRepair(v))}</div>` : "—")}</td>
         <td>${use || insp ? "—" : esc(lotOf(v))}${keyLine(v, use, fixRepair(v)) ? `<div class="keyrow">${keyLine(v, use, fixRepair(v))}</div>` : ""}</td><td>${shakenDays(v, ' style="font-size:13px"')}</td></tr>`;
         }).join(""));
       }).join("")}
@@ -1328,7 +1408,7 @@ function renderPc() {
 
   $("pc").innerHTML = pcTabs() + `
   <div class="top"><h1>社用車 今日の状況</h1><span class="today">${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日（${DOW[d.getDay()]}）</span>
-    <div class="counts"><div class="count free">${n("free")}<span>空き</span></div><div class="count use">${n("use")}<span>使用中</span></div><div class="count fix">${n("fix")}<span>修理中</span></div><div class="count insp">${n("insp")}<span>車検中</span></div></div>
+    <div class="counts"><div class="count free">${n("free")}<span>空き</span></div><div class="count use">${n("use")}<span>使用中</span></div>${n("wait") ? `<div class="count wait">${n("wait")}<span>まだ出ていない</span></div>` : ""}<div class="count fix">${n("fix")}<span>修理中</span></div><div class="count insp">${n("insp")}<span>車検中</span></div></div>
     <button class="btn ghost small" data-act="settings">⚙ 設定</button></div>
   ${errBar()}
   <div class="grid2">
@@ -1551,7 +1631,7 @@ function openModal(id) {
         ${v ? plateHtml(v) : ""}
         <label class="photo-btn">📷 ${v && v.photoUrl ? "写真を変える" : "写真を登録"}<input type="file" accept="image/*,.heic,.heif" hidden id="f-photo"></label>
       </div>
-      ${v ? undoBox(v) : ""}
+      ${v ? undoBox(v) + startBoxPc(v) : ""}
       <p class="ferr" id="ferr" hidden></p>
       <div class="field"><label>ナンバー</label>
         <div class="plate-in">
@@ -1601,6 +1681,12 @@ function keyField(v) {
   return `<div class="field"><label>鍵の場所</label><div class="seg keyseg">${ks.map(k =>
     `<label class="chip${k === KEY_IN_CAR ? " incar" : ""}"><input type="radio" name="keyPlace" value="${esc(k)}"${k === now ? " checked" : ""}>${esc(k)}</label>`).join("")}</div>
     <div class="hint">${now ? `いまの記録：${esc(now)}${when ? `（${esc(when)}）` : ""}。鍵を動かしたら選び直して「保存する」を押してください` : "まだ記録がありません。選んで「保存する」を押すと記録します（返却のときにも記録されます）"}</div></div>`;
+}
+// 今日の予約で、まだ「使い始める」を押していない車：代わりに押せる（押した人は「事務所（PC）」などで残る）
+function startBoxPc(v) {
+  const w = !v.inspection && !fixRepair(v) && !currentUse(v) ? waitRes(v) : null; if (!w) return "";
+  return `<div class="undo-box wait"><div class="grow"><b>${LABEL.wait}</b>　${esc(w.who)}さん → ${esc(w.site)}　${rangeText(w)}<div class="sb-sub">${startNote(w)}</div></div>
+    ${startBtn(w, "btn primary small")}${canCancel(w) ? `<button type="button" class="btn ghost small" data-act="cancelRes" data-id="${w.id}">予約を取り消す</button>` : ""}</div>`;
 }
 // 車検中・修理中の車：間違えたとき用の取り消しボタン（車検から戻ったとき・修理が終わったときは使わない）
 function undoBox(v) {
@@ -2287,6 +2373,7 @@ document.addEventListener("click", e => {
     case "detDay": detPickDay(id, val); break; // 車の詳しい画面のカレンダー：空いている日
     case "detRes": { const r = S.reservations.find(x => x.id === val); if (r) akiShowBlock({ k: "use", r, late: isOverdue(r) }); break; }
     case "akiClose": closeSheet(); break;
+    case "startUse": if (sheetOpen()) closeSheet(); startUse(val); break;
     case "keyEdit": openKeySheet(id); break;
     case "keySet": setKey(id, val); break;
     case "akiReserve": hideSheet(); openReserve(id, val); break;

@@ -79,6 +79,8 @@ service cloud.firestore {
     }
 
     // ---- 予約 ----
+    // 使い始め（版26）：needStart＝押すまで使用中にしない予約、startedAt/startedBy＝押した時・人、startAuto＝9:00 より後に入れた今日の予約（そのまま使用中）
+    // noStart＝9:00 までに押さなかったので Functions が取り消した印（Functions は管理者の権限で書く）
     function validReservation(d) {
       return d.keys().hasAll(['vehicleId', 'who', 'site', 'from', 'to'])
         && str(d.vehicleId, 100)
@@ -88,6 +90,11 @@ service cloud.firestore {
         && optStr(d, 'createdBy', 40)
         && optStr(d, 'returnedLot', 30)
         && optStr(d, 'returnedKey', 30)
+        && (!('needStart' in d) || d.needStart is bool)
+        && (!('startedAt' in d) || d.startedAt == null || d.startedAt is timestamp)
+        && optStr(d, 'startedBy', 40)
+        && (!('startAuto' in d) || d.startAuto is bool)
+        && (!('noStart' in d) || d.noStart is bool)
         && (!('canceled' in d) || d.canceled is bool)
         && optStr(d, 'canceledBy', 40);
     }
@@ -157,14 +164,14 @@ service cloud.firestore {
         && (!('keyPlaces' in d) || (d.keyPlaces is list && d.keyPlaces.size() >= 1 && d.keyPlaces.size() <= 4))
         && (!('shakenAlertDays' in d) || (d.shakenAlertDays is int && d.shakenAlertDays >= 1 && d.shakenAlertDays <= 365));
     }
-    // 通知を届ける人（PCの設定 → 通知）：通知の種類ごとに名前のリスト（wish：車検の希望日、avail：預けられる日が決まった）
+    // 通知を届ける人（PCの設定 → 通知）：通知の種類ごとに名前のリスト（wish：車検の希望日、avail：預けられる日が決まった、start：使い始めのお知らせ、nostart：使い始めなしの取り消し）
     function nameList(d, k) {
       return !(k in d) || (d[k] is list && d[k].size() <= 500);
     }
     function validNotify(d) {
-      return d.keys().hasOnly(['shaken', 'due', 'overdue', 'repair', 'wish', 'avail', 'updatedAt'])
+      return d.keys().hasOnly(['shaken', 'due', 'overdue', 'repair', 'wish', 'avail', 'start', 'nostart', 'updatedAt'])
         && nameList(d, 'shaken') && nameList(d, 'due') && nameList(d, 'overdue') && nameList(d, 'repair')
-        && nameList(d, 'wish') && nameList(d, 'avail');
+        && nameList(d, 'wish') && nameList(d, 'avail') && nameList(d, 'start') && nameList(d, 'nostart');
     }
     match /settings/{docId} {
       allow read: if signedIn();

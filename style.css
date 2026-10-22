@@ -806,3 +806,32 @@ input[type="search"]::-webkit-search-decoration{-webkit-appearance:none}
 .keyuse .hint{display:inline;margin-left:6px;font-weight:500}
 /* 設定：鍵の置き場所の欄の最後に「車につけたまま」（変えられない） */
 .key-fixed{display:flex;align-items:center;justify-content:center;min-width:0;min-height:44px;padding:4px 6px;border:1.5px dashed var(--use);border-radius:8px;background:var(--use-bg);color:var(--use-deep);font-size:13px;font-weight:700;text-align:center;line-height:1.3}
+/* ---- 予約（まだ出ていない）：予約の日に「使い始める」を押すまで（版26）。使用中（オレンジ）と分かるよう青 ---- */
+:root{--wait:#3478C6;--wait-bg:#E4EEFA;--wait-t:#235C9E}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--wait-bg:#1C2B40;--wait-t:#93C0F2}}
+:root[data-theme="dark"]{--wait-bg:#1C2B40;--wait-t:#93C0F2}
+.band.wait,.status-pill.wait{background:var(--wait)}
+.dot.wait{background:var(--wait)}
+.count.wait{background:var(--wait-bg);color:var(--wait-t)}
+.table tr.grp.wait td{color:var(--wait-t);border-left-color:var(--wait)}
+.table tr.vrow.wait td:first-child{border-left-color:var(--wait)}
+.table tr.vrow.wait td{background:color-mix(in srgb,var(--wait) 4%,var(--paper))}
+.table td .s.waitnote{color:var(--wait-t);font-weight:700}
+.a-blk.use.wait{background:var(--wait)}
+.a-legend i.wait{background:var(--wait)}
+.a-wait{color:var(--wait-t);font-weight:700}
+.abtn.go.wait{background:var(--wait);color:#fff}
+/* スマホの一覧のいちばん上：今日の予約で、まだ「使い始める」を押していないもの */
+.mywait{border-radius:14px;background:var(--wait-bg);border:2px solid var(--wait);padding:10px 12px;min-width:0}
+.mw-head{font-size:13px;font-weight:900;color:var(--wait-t);margin-bottom:4px;overflow-wrap:anywhere}
+.mw-btn{flex:none;min-height:52px;padding:0 18px;border:0;border-radius:12px;background:var(--wait);color:#fff;font-size:17px;font-weight:900}
+.mw-btn:disabled,.startbtn:disabled{opacity:.6}
+.mw-note{margin-top:6px;font-size:13px;font-weight:700;color:var(--wait-t);overflow-wrap:anywhere}
+/* 車の画面：「使い始める」の箱（ほかの人の予約でも代わりに押せる） */
+.startbox{display:grid;gap:8px;border-radius:14px;background:var(--wait-bg);border:2px solid var(--wait);padding:12px}
+.sb-note{margin:0;font-size:14px;font-weight:700;color:var(--wait-t);overflow-wrap:anywhere}
+.sb-sub{margin:0;font-size:12px;font-weight:500;color:var(--mute);overflow-wrap:anywhere}
+.startbox .btn.primary.startbtn{background:var(--wait)}
+.undo-box.wait{background:var(--wait-bg);color:var(--wait-t)}
+.undo-box.wait .btn.primary.startbtn{background:var(--wait)}
+.done .done-note{margin:-12px 0 24px;font-size:14px;font-weight:700;color:var(--wait-t)}
