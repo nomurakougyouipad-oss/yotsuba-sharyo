@@ -35,7 +35,7 @@ const db = initializeFirestore(fbApp, { localCache: persistentLocalCache({ tabMa
 const storage = getStorage(fbApp);
 
 /* ---------- 定数 ---------- */
-const APP_VERSION = "27"; // 版の番号（名前のメニューの下に出す）。sw.js の CACHE（sharyo-v○○）と同じ番号にする
+const APP_VERSION = "28"; // 版の番号（名前のメニューの下に出す）。sw.js の CACHE（sharyo-v○○）と同じ番号にする
 const TYPES = ["トラック", "バン", "普通車"];
 const SHOP_NAME = "トラストワン"; // 整備工場（子会社）の名前。専用ページは shop.html
 const LABEL = { free: "空き", use: "使用中", fix: "修理中", own: "専用", insp: "車検中", wait: "予約（まだ出ていない）" };
@@ -111,10 +111,16 @@ function nameChips(q, selected, act) {
 let ME = lsGet("sharyo_me") || "";
 function saveMe(n) {
   n = String(n || "").trim().slice(0, 40); if (!n) return;
-  ME = n; lsSet("sharyo_me", n); resetForm(); meQuery = "";
+  ME = n; lsSet("sharyo_me", n); resetForm(); meQuery = ""; mePick = "";
   if (pushState() === "on") saveToken(); // この端末の通知を新しい名前にひもづけ直す
   go({ name: "list" });
 }
+// PC版（ダッシュボード）では、この端末に保存した名前を使わない（版28）
+// 事務所のPCはいろいろな人が使い、PC版の画面には名前が出ないため。予約の「使う人」は毎回選び、記録する人は「事務所（PC）」
+const PC_OPERATOR = "事務所（PC）";
+const pcView = () => ui.view === "pc";
+// 記録に残す「操作した人」：スマホ版はこの端末の名前、PC版は「事務所（PC）」
+const operator = () => (!pcView() && ME) || PC_OPERATOR;
 
 /* ---------- 車の状態（README「状態の決め方」） ---------- */
 const active = () => S.vehicles.filter(v => !v.retired);
@@ -423,8 +429,14 @@ function bindAkiSync(s) {
 }
 
 let meQuery = "";
+let mePick = ""; // 名前を押したあと、確かめている名前（版28：押しまちがいで別の人の名前にならないように）
 function nameScreen(first) {
   if (!S.membersLoaded) return `<div class="loading">読み込み中…</div>`; // 名簿が届くまでは「読み込み中…」だけ
+  if (mePick) return `<div class="welcome mecheck">
+    <h2><b>${esc(mePick)}</b>さんで<br>いいですか？</h2>
+    <p class="sub">このスマホで予約や修理を頼むと、「${esc(mePick)}」の名前で記録されます</p>
+    <div class="actions"><button class="btn primary big" data-act="meOk">はい、${esc(mePick)}です</button>
+      <button class="btn ghost" data-act="meBack">ちがう（選び直す）</button></div></div>`;
   return `<div class="welcome">${first
     ? `<h2>あなたの名前を選んでください</h2><p class="sub" style="margin:0 0 14px">このスマホに覚えておきます。予約するとき自動で入ります</p>`
     : `<p class="sub" style="margin:0 0 14px">今は「${esc(ME)}」です。変えるなら選んでください</p>`}
@@ -794,7 +806,7 @@ async function startUse(rid) {
       if (!x || x.canceled) throw new ClashError(x && x.noStart ? "9時を過ぎたので、この予約は取り消されました" : "この予約は取り消されています");
       if (x.returnedAt) throw new ClashError("この予約はもう返却されています");
       if (x.startedAt) return; // ほかの人がもう押した
-      tx.update(ref, { startedAt: serverTimestamp(), startedBy: operator() });
+      tx.update(ref, { startedAt: serverTimestamp(), startedBy: operator(), startedDev: devMark() });
     });
     const v = byId(r.vehicleId); ok = true;
     toast(`使い始めました${v ? `（${v.kind}）` : ""}`);
@@ -816,7 +828,7 @@ function cancelReservation(id) {
   const v = byId(r.vehicleId);
   if (!confirm(`${rangeText(r)} ${v ? v.kind : ""}の予約を取り消しますか？`)) return;
   // データは消さずに「取り消し済み」の印と、取り消した人・日時を残す
-  updateDoc(doc(db, "reservations", id), { canceled: true, canceledBy: ME || "事務所（PC）", canceledAt: serverTimestamp() })
+  updateDoc(doc(db, "reservations", id), { canceled: true, canceledBy: operator(), canceledAt: serverTimestamp(), canceledDev: devMark() })
     .catch(e => { console.error(e); toast("取り消せませんでした。もう一度お試しください", "err"); });
   toast("予約を取り消しました");
   document.querySelectorAll(`#modal [data-act="cancelRes"][data-id="${id}"]`).forEach(b => { const box = b.closest(".undo-box"); if (box) box.remove(); }); // PC の車の画面
@@ -930,11 +942,11 @@ const resOpen = () => (ui.view === "phone" ? ui.screen.name === "reserve" : !!ui
 
 function reserveForm(v) {
   if (form.vid !== v.id) { resetForm(); form.vid = v.id; }
-  if (!ME && !form.other) { form.other = true; form.picking = true; } // PC（名前なし）は使う人を選ぶ
+  if ((pcView() || !ME) && !form.other) { form.other = true; form.picking = true; } // PC版（と名前なし）は、使う人を毎回選ぶ
   form.site = form.site || "";
   const sites = S.settings.sites || [];
   const lic = licOf(v);
-  const meBtn = ME ? `<button class="chip" style="margin-top:8px" data-act="whoMe">自分に戻す</button>` : "";
+  const meBtn = ME && !pcView() ? `<button class="chip" style="margin-top:8px" data-act="whoMe">自分に戻す</button>` : "";
   return `<div class="sheet-title">${esc(v.kind)}</div><p class="sub">${plateText(v)}</p>
   ${lic !== "普通" ? `<div class="licwarn">⚠ この車は${lic}以上の免許が必要です<small>${esc(LICENSE_NOTE[lic])}</small></div>` : ""}
   ${lateWarn(v)}<div class="field">${rangePicker(v)}</div>
@@ -955,7 +967,7 @@ async function doReserve(v) {
   if (form.busy) return;
   if (!canReserve(v)) { form.err = `この車は${v.owner}さん専用です`; render(); return; }
   const t = ymd(today());
-  const who = form.other ? (form.picking ? "" : (form.who || "")) : ME;
+  const who = form.other || pcView() ? (form.picking ? "" : (form.who || "")) : ME;
   const site = form.site === SITE_OTHER ? String(form.siteOther || "").trim() : form.site;
   const ranges = multi() ? toRanges(form.days || []) : (form.s ? [{ from: form.s, to: form.e || form.s }] : []);
   let err = "";
@@ -968,7 +980,8 @@ async function doReserve(v) {
   if (err) { form.err = err; render(); return; }
 
   form.err = ""; form.busy = true; render();
-  const base = { vehicleId: v.id, who, site, createdBy: operator(), returnedAt: null, returnedLot: null };
+  const dev = devMark();
+  const base = { vehicleId: v.id, who, site, createdBy: operator(), createdDev: dev, returnedAt: null, returnedLot: null };
   try {
     // 2台のスマホで同時に予約しても重ならないよう、サーバーの最新の予約で確かめてから登録する
     await runTransaction(db, async tx => {
@@ -985,7 +998,7 @@ async function doReserve(v) {
       // 版26から：予約の日に「使い始める」を押すまでは使用中にしない（needStart）。ただし 9:00 より後に入れた今日の予約は、そのまま使用中（startAuto）
       ranges.forEach(g => tx.set(doc(collection(db, "reservations")), {
         ...base, from: g.from, to: g.to, createdAt: serverTimestamp(), needStart: true,
-        ...(g.from === t && afterStartLimit() ? { startedAt: serverTimestamp(), startedBy: operator(), startAuto: true } : {}),
+        ...(g.from === t && afterStartLimit() ? { startedAt: serverTimestamp(), startedBy: operator(), startedDev: dev, startAuto: true } : {}),
       }));
     });
   } catch (e) {
@@ -1056,6 +1069,10 @@ const SHOP_TYPES = NTYPES.filter(t => t[4] !== "staff").map(t => t[0]);
 const TOKEN_KEY = "sharyo_push_token";
 const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 const isStandalone = () => navigator.standalone === true || matchMedia("(display-mode: standalone)").matches;
+const deviceKind = () => (isIOS ? "ios" : /Android/.test(navigator.userAgent) ? "android" : "pc");
+// 端末の印（版28）：予約・修理依頼・使い始め・取り消しの記録に、どの端末で押したかを残す（名前がまちがって入ったとき調べられるように）
+// uid＝匿名ログインのID（端末・ブラウザごとにちがう）、device＝ios / android / pc、view＝押した画面（phone＝スマホ版、pc＝PC版）
+const devMark = () => ({ uid: (auth.currentUser && auth.currentUser.uid) || "", device: deviceKind(), view: pcView() ? "pc" : "phone" });
 const prefId = name => encodeURIComponent(name);
 // PC でオンにされている通知（この人の分）と、本人がオフにしたもの
 const adminOn = name => NTYPES.map(t => t[0]).filter(t => (S.notify[t] || []).includes(name));
@@ -1110,7 +1127,7 @@ async function saveToken(fresh = false) {
     const token = await pushStep("token", ms.m.getToken(ms.inst, { vapidKey: VAPID_KEY, serviceWorkerRegistration: reg }), 30000);
     if (!token) throw Object.assign(new Error("空でした"), { step: "token" });
     const old = lsGet(TOKEN_KEY);
-    await pushStep("save", setDoc(doc(db, "pushTokens", token), { name: ME, platform: isIOS ? "ios" : (/Android/.test(navigator.userAgent) ? "android" : "pc"), updatedAt: serverTimestamp() }), 20000);
+    await pushStep("save", setDoc(doc(db, "pushTokens", token), { name: ME, platform: deviceKind(), updatedAt: serverTimestamp() }), 20000);
     if (old && old !== token) deleteDoc(doc(db, "pushTokens", old)).catch(() => {});
     lsSet(TOKEN_KEY, token);
     setPushStatus(true, fresh ? "無効になっていた登録を捨てて、新しく登録し直しました" : "この端末は通知を受け取れる状態です");
@@ -1309,10 +1326,10 @@ async function doRepair(v) {
     if (ui.screen.name === "repair") render();
     return;
   }
-  // 頼んだ人は自分の名前。出しただけでは「修理中」にしない（事務所が決める）
+  // 頼んだ人は自分の名前（PC版なら「事務所（PC）」）。出しただけでは「修理中」にしない（事務所が決める）
   setDoc(ref, {
     vehicleId: v.id, symptoms: SYMPTOMS.filter(x => rform.sym.has(x)), memo,
-    photoUrls: photos.map(p => p.photoUrl), photos, reportedBy: ME, status: "open", availDate: rform.avail || null, // 預けられる日（トラストワンの画面に出る）
+    photoUrls: photos.map(p => p.photoUrl), photos, reportedBy: operator(), reportedDev: devMark(), status: "open", availDate: rform.avail || null, // 預けられる日（トラストワンの画面に出る）
     createdAt: serverTimestamp(), doneAt: null,
   }).catch(e => { console.error(e); toast("修理依頼を送れませんでした。もう一度お試しください"); });
   resetRform(null);
@@ -2018,7 +2035,6 @@ function restoreVehicle(id) {
 
 /* ---------- 車検に出す・車検から戻す（PCのみ） ---------- */
 // 記録は inspections に残す（どの車・出した日・戻した日・前と新しい満了日・操作した人）
-const operator = () => ME || "事務所（PC）";
 function inspHead(v, title) {
   return `<div class="overlay"><form class="modal panel imodal" id="${title === "車検に出す" ? "ioform" : "ibform"}" data-id="${v.id}" novalidate>
     <h2>${title}<button type="button" class="x" data-act="close" aria-label="閉じる">×</button></h2>
@@ -2355,8 +2371,10 @@ document.addEventListener("click", e => {
     case "detail": detMonth = 0; go({ name: "detail", id }); break;
     case "back": goBack(); break;
     case "goto": go({ name: val, id }); break;
-    case "me": saveMe(val); break;
-    case "meEdit": go({ name: "me" }); break;
+    case "me": mePick = val; render(); $("ph-screen").scrollTop = 0; break; // すぐには決めず「○○さんでいいですか？」
+    case "meOk": saveMe(mePick); break;
+    case "meBack": mePick = ""; render(); break;
+    case "meEdit": mePick = ""; go({ name: "me" }); break;
     case "whoOther": form.other = true; form.picking = true; form.whoQ = ""; form.err = ""; render(); break;
     case "whoMe": form.other = false; form.picking = false; form.who = ""; form.err = ""; render(); break;
     case "pickWho": form.who = val; form.picking = false; form.err = ""; render(); break;

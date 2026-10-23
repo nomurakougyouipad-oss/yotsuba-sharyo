@@ -138,6 +138,11 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:3px solid v
 .mine .sw{background:rgba(255,255,255,.2);border:0;color:#fff;border-radius:999px;padding:6px 12px;font-size:13px;font-weight:700}
 .welcome{padding:10px 0}
 .welcome h2{font-size:22px;margin:0 0 4px}
+/* 名前を押したあとの「○○さんでいいですか？」（版28） */
+.mecheck{text-align:center;padding:28px 0 10px}
+.mecheck h2{font-size:24px;line-height:1.5;margin:0 0 16px}
+.mecheck h2 b{display:inline-block;font-size:36px;color:var(--steel-t);margin-right:2px}
+.mecheck .sub{margin:0 0 6px}
 .sheet-title{font-size:20px;font-weight:900;margin:4px 0 14px}
 .sub{color:var(--mute);font-size:14px;margin:-8px 0 14px}
 

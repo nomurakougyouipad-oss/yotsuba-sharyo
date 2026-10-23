@@ -78,6 +78,26 @@ service cloud.firestore {
       allow delete: if signedIn() && isSample();
     }
 
+    // ---- 端末の印（版28） ----
+    // 予約・修理依頼・使い始め・取り消しで、どの端末で押したかを残す
+    // uid＝匿名ログインのID、device＝ios / android / pc、view＝押した画面（phone＝スマホ版、pc＝PC版）
+    function validDev(x) {
+      return x is map && x.keys().hasOnly(['uid', 'device', 'view'])
+        && str(x.uid, 128)
+        && x.device in ['ios', 'android', 'pc']
+        && x.view in ['phone', 'pc'];
+    }
+    // 新しく付ける印は、書いている端末自身のもの（uid が自分の匿名ログインのID）だけ
+    // 前から付いている印は、そのまま残すならよい（返却などで、ほかの端末が同じ記録を書きかえるとき）。消すことはできない
+    function devOk(k) {
+      let d = request.resource.data;
+      let had = resource != null && k in resource.data;
+      return (!had || k in d)
+        && (!(k in d)
+          || (had && resource.data[k] == d[k])
+          || (validDev(d[k]) && d[k].uid == request.auth.uid));
+    }
+
     // ---- 予約 ----
     // 使い始め（版26）：needStart＝押すまで使用中にしない予約、startedAt/startedBy＝押した時・人、startAuto＝9:00 より後に入れた今日の予約（そのまま使用中）
     // noStart＝9:00 までに押さなかったので Functions が取り消した印（Functions は管理者の権限で書く）
@@ -100,7 +120,9 @@ service cloud.firestore {
     }
     match /reservations/{reservationId} {
       allow read: if signedIn();
-      allow create, update: if signedIn() && validReservation(request.resource.data);
+      // createdDev＝予約した端末、startedDev＝「使い始める」を押した端末、canceledDev＝取り消した端末（版28）
+      allow create, update: if signedIn() && validReservation(request.resource.data)
+        && devOk('createdDev') && devOk('startedDev') && devOk('canceledDev');
       allow delete: if signedIn() && (isSample() || onSampleVehicle());
     }
 
@@ -123,7 +145,8 @@ service cloud.firestore {
     }
     match /repairs/{repairId} {
       allow read: if signedIn();
-      allow create, update: if signedIn() && validRepair(request.resource.data);
+      // reportedDev＝修理を頼んだ端末（版28）
+      allow create, update: if signedIn() && validRepair(request.resource.data) && devOk('reportedDev');
       allow delete: if signedIn() && (isSample() || onSampleVehicle());
     }
 
